@@ -16,7 +16,6 @@ public class CppParser {
             "int*", "long long*", "double*", "float*", "int32_t*", "int64_t*"
     );
 
-
     private static final Pattern SIGNATURE_PATTERN = Pattern.compile(
             "^\\s*(?:extern\\s+\"C\"\\s+)?(.+?)\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*\\{?"
     );
@@ -50,7 +49,9 @@ public class CppParser {
         String name = m.group(2).trim();
         String paramsRaw = m.group(3).trim();
 
-        if (!SUPPORTED_TYPES.contains(returnType)) return Optional.empty();
+        if (!SUPPORTED_TYPES.contains(returnType) && !returnType.endsWith("*")) {
+            return Optional.empty();
+        }
 
         List<String> paramTypes = parseParamTypes(paramsRaw);
         if (paramTypes == null) return Optional.empty();
@@ -65,7 +66,10 @@ public class CppParser {
         for (String param : paramsRaw.split(",")) {
             String trimmed = param.trim();
             String type = extractType(trimmed);
-            if (type == null || !SUPPORTED_TYPES.contains(type)) return null;
+
+            if (type == null || (!SUPPORTED_TYPES.contains(type) && !type.endsWith("*"))) {
+                return null;
+            }
             types.add(type);
         }
         return types;
@@ -89,7 +93,7 @@ public class CppParser {
             if (isPointer && !typeCandidate.endsWith("*")) {
                 typeCandidate += "*";
             }
-            if (SUPPORTED_TYPES.contains(typeCandidate)) {
+            if (typeCandidate.endsWith("*") || SUPPORTED_TYPES.contains(typeCandidate)) {
                 return typeCandidate;
             }
         }

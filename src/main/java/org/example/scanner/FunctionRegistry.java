@@ -85,6 +85,9 @@ public class FunctionRegistry {
 
     private boolean typeMatches(String cppType, Object arg) {
         return switch (cppType) {
+            case "int*", "int32_t*", "long long*", "int64_t*", "double*", "float*" ->
+                    arg instanceof java.util.Collection;
+
             case "int8_t", "uint8_t", "char", "unsigned char" -> arg instanceof Byte;
 
             case "int16_t", "uint16_t", "short", "unsigned short" -> arg instanceof Short;
@@ -100,10 +103,15 @@ public class FunctionRegistry {
 
             case "std::string", "const char*" -> arg instanceof String;
 
-            case "int*", "int32_t*", "long long*", "int64_t*", "double*", "float*" ->
-                    arg instanceof java.util.Collection;
+            default -> {
+                if (cppType.endsWith("*") && arg != null) {
+                    String expectedClassName = cppType.substring(0, cppType.length() - 1).trim();
+                    String actualClassName = arg.getClass().getSimpleName();
 
-            default -> false;
+                    yield actualClassName.equals(expectedClassName);
+                }
+                yield false;
+            }
         };
     }
 

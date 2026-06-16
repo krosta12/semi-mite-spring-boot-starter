@@ -138,6 +138,11 @@ public class DefaultCppEngine implements CppEngine {
     }
 
     private MemoryLayout toLayout(String cppType) {
+
+        if (cppType != null && cppType.endsWith("*")) {
+            return ValueLayout.ADDRESS;
+        }
+
         return switch (cppType) {
             case "int8_t", "uint8_t", "char", "unsigned char" -> ValueLayout.JAVA_BYTE;
             case "int16_t", "uint16_t", "short", "unsigned short" -> ValueLayout.JAVA_SHORT;
@@ -164,8 +169,11 @@ public class DefaultCppEngine implements CppEngine {
             if ("std::string".equals(type) || "const char*".equals(type)) {
                 result[i] = arena.allocateFrom((String) args[i]);
             } else if (type.endsWith("*")) {
-                java.util.Collection<?> collection = (java.util.Collection<?>) args[i];
-                result[i] = allocateNativeArray(collection, type, arena);
+                if (args[i] instanceof java.util.Collection) {
+                    result[i] = allocateNativeArray((java.util.Collection<?>) args[i], type, arena);
+                } else {
+                    result[i] = marshalCustomObject(args[i], arena);
+                }
             } else {
                 result[i] = args[i];
             }
@@ -211,5 +219,78 @@ public class DefaultCppEngine implements CppEngine {
             }
             default -> throw new MiteException("Unsupported array type for marshalling: " + cppType);
         };
+    }
+
+
+
+    private MemorySegment marshalCustomObject(Object obj, Arena arena) {
+        if (obj == null) return MemorySegment.NULL;
+        try {
+            java.lang.reflect.Field[] fields = obj.getClass().getDeclaredFields();
+            long currentOffset = 0;
+            long maxAlignment = 1;
+
+            java.util.Map<java.lang.reflect.Field, Long> fieldOffsets = new java.util.HashMap<>();
+
+            for (java.lang.reflect.Field field : fields) {
+                if (field.isSynthetic()) continue;
+                field.setAccessible(true);
+
+                Class<?> fType = field.getType();
+                long size;
+
+                if (fType == int.class || fType == Integer.class) size = 4;
+                else if (fType == long.class || fType == Long.class) size = 8;
+                else if (fType == double.class || fType == Double.class) size = 8;
+                else if (fType == float.class || fType == Float.class) size = 4;
+                else if (fType == String.class) size = 8;
+                else if (fType == boolean.class || fType == Boolean.class) size = 1;
+                else if (fType == byte.class || fType == Byte.class) size = 1;
+                else continue;
+
+                long alignment = size;
+                if (alignment > maxAlignment) maxAlignment = alignment;
+
+                currentOffset = (currentOffset + alignment - 1) & ~(alignment - 1);
+                fieldOffsets.put(field, currentOffset);
+                currentOffset += size;
+            }
+
+            long totalSize = (currentOffset + maxAlignment - 1) & ~(maxAlignment - 1);
+            if (totalSize == 0) totalSize = 1;
+
+            MemorySegment structSegment = arena.allocate(totalSize);
+
+            for (java.lang.reflect.Field field : fields) {
+                if (!fieldOffsets.containsKey(field)) continue;
+                long offset = fieldOffsets.get(field);
+                Object val = field.get(obj);
+
+                if (val == null) continue;
+
+                Class<?> fType = field.getType();
+
+                if (fType == String.class) {
+                    MemorySegment strSegment = arena.allocateFrom((String) val);
+                    structSegment.set(ValueLayout.ADDRESS, offset, strSegment);
+                } else if (fType == int.class || fType == Integer.class) {
+                    structSegment.set(ValueLayout.JAVA_INT, offset, ((Number) val).intValue());
+                } else if (fType == long.class || fType == Long.class) {
+                    structSegment.set(ValueLayout.JAVA_LONG, offset, ((Number) val).longValue());
+                } else if (fType == double.class || fType == Double.class) {
+                    structSegment.set(ValueLayout.JAVA_DOUBLE, offset, ((Number) val).doubleValue());
+                } else if (fType == float.class || fType == Float.class) {
+                    structSegment.set(ValueLayout.JAVA_FLOAT, offset, ((Number) val).floatValue());
+                } else if (fType == boolean.class || fType == Boolean.class) {
+                    structSegment.set(ValueLayout.JAVA_BOOLEAN, offset, (Boolean) val);
+                } else if (fType == byte.class || fType == Byte.class) {
+                    structSegment.set(ValueLayout.JAVA_BYTE, offset, ((Number) val).byteValue());
+                }
+            }
+
+            return structSegment;
+        } catch (Exception e) {
+            throw new MiteException("Failed to automatically marshal object to C-struct: " + obj.getClass().getName(), e);
+        }
     }
 }
