@@ -21,7 +21,7 @@ public class DefaultCppEngine implements CppEngine {
     private final FunctionRegistry registry;
     private final Linker linker = Linker.nativeLinker();
 
-    private final Path cacheFile = Path.of("cppScripts", ".mite_cache.properties");
+    private final Path cacheFile = Path.of("cppScripts/compileCache", ".mite_cache.properties");
     private final Properties cache = new Properties();
 
     public DefaultCppEngine(CppCompiler compiler, FunctionRegistry registry) {
@@ -146,8 +146,13 @@ public class DefaultCppEngine implements CppEngine {
             case "float" -> ValueLayout.JAVA_FLOAT;
             case "double" -> ValueLayout.JAVA_DOUBLE;
             case "bool" -> ValueLayout.JAVA_BOOLEAN;
-            case "std::string", "const char*" -> ValueLayout.ADDRESS;
+
+
+            case "std::string", "const char*", "int*", "int32_t*", "long long*", "int64_t*", "double*", "float*" ->
+                    ValueLayout.ADDRESS;
             case "void" -> null;
+
+
             default -> throw new MiteException("Unknown type: " + cppType);
         };
     }
@@ -158,6 +163,10 @@ public class DefaultCppEngine implements CppEngine {
             String type = paramTypes.get(i);
             if ("std::string".equals(type) || "const char*".equals(type)) {
                 result[i] = arena.allocateFrom((String) args[i]);
+            } else if (type.endsWith("*")) {
+                // Если прилетел список — выделяем под него нативный массив чисел
+                List<?> list = (List<?>) args[i];
+                result[i] = allocateNativeArray(list, type, arena);
             } else {
                 result[i] = args[i];
             }
@@ -174,5 +183,31 @@ public class DefaultCppEngine implements CppEngine {
             return new String(safe.asSlice(0, len).toArray(ValueLayout.JAVA_BYTE));
         }
         return result;
+    }
+
+
+
+    private MemorySegment allocateNativeArray(List<?> list, String cppType, Arena arena) {
+        int size = list.size();
+        return switch (cppType) {
+            case "int*", "int32_t*" -> {
+                int[] arr = list.stream().mapToInt(x -> ((Number) x).intValue()).toArray();
+                yield arena.allocateFrom(ValueLayout.JAVA_INT, arr);
+            }
+            case "long long*", "int64_t*" -> {
+                long[] arr = list.stream().mapToLong(x -> ((Number) x).longValue()).toArray();
+                yield arena.allocateFrom(ValueLayout.JAVA_LONG, arr);
+            }
+            case "double*" -> {
+                double[] arr = list.stream().mapToDouble(x -> ((Number) x).doubleValue()).toArray();
+                yield arena.allocateFrom(ValueLayout.JAVA_DOUBLE, arr);
+            }
+            case "float*" -> {
+                float[] arr = new float[size];
+                for (int i = 0; i < size; i++) arr[i] = ((Number) list.get(i)).floatValue();
+                yield arena.allocateFrom(ValueLayout.JAVA_FLOAT, arr);
+            }
+            default -> throw new MiteException("Unsupported array type for marshalling: " + cppType);
+        };
     }
 }

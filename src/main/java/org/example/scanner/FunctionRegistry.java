@@ -24,7 +24,9 @@ public class FunctionRegistry {
         index.clear();
         if (!Files.exists(scriptsDir)) return;
         try (var stream = Files.walk(scriptsDir)) {
-            stream.filter(p -> p.toString().endsWith(".cpp"))
+            stream
+                    .filter(p -> !p.startsWith(scriptsDir.resolve("compileCache")))
+                    .filter(p -> p.toString().endsWith(".cpp"))
                     .forEach(this::indexFile);
         } catch (IOException e) {
             throw new RuntimeException("Could not scan directory: " + scriptsDir, e);
@@ -97,6 +99,8 @@ public class FunctionRegistry {
             case "bool" -> arg instanceof Boolean;
 
             case "std::string", "const char*" -> arg instanceof String;
+
+            case "int*", "int32_t*", "long long*", "int64_t*", "double*", "float*" -> arg instanceof java.util.List;
 
             default -> false;
         };

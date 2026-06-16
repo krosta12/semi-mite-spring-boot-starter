@@ -10,7 +10,10 @@ public class CppParser {
     private static final Set<String> SUPPORTED_TYPES = Set.of(
             "int", "long", "double", "float", "bool", "std::string", "void", "const char*",
             "int8_t", "uint8_t", "int16_t", "uint16_t", "int32_t", "uint32_t", "int64_t", "uint64_t",
-            "char", "unsigned char", "short", "unsigned short", "long long", "unsigned long long"
+            "char", "unsigned char", "short", "unsigned short", "long long", "unsigned long long",
+
+            //special types
+            "int*", "long long*", "double*", "float*", "int32_t*", "int64_t*"
     );
 
 
@@ -72,7 +75,9 @@ public class CppParser {
         if (param.matches("const\\s+char\\s*\\*.*")) return "const char*";
         if (param.trim().equals("void")) return null;
 
-        param = param.replaceAll("\\bconst\\b", "").replaceAll("[&*]", "").trim().replaceAll("\\s+", " ");
+        boolean isPointer = param.contains("*") && !param.contains("char");
+
+        param = param.replaceAll("\\bconst\\b", "").replaceAll("&", "").trim().replaceAll("\\s+", " ");
 
         if (SUPPORTED_TYPES.contains(param)) {
             return param;
@@ -81,6 +86,9 @@ public class CppParser {
         int lastSpace = param.lastIndexOf(' ');
         if (lastSpace != -1) {
             String typeCandidate = param.substring(0, lastSpace).trim();
+            if (isPointer && !typeCandidate.endsWith("*")) {
+                typeCandidate += "*";
+            }
             if (SUPPORTED_TYPES.contains(typeCandidate)) {
                 return typeCandidate;
             }
