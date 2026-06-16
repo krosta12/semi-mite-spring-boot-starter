@@ -12,12 +12,16 @@ public class CppCompiler {
     private final Path cacheDir;
     private final Map<String, CachedLib> cache = new ConcurrentHashMap<>();
 
-    public CppCompiler(Path cacheDir) {
+    private final String customCompilerPath;
+
+
+    public CppCompiler(Path cacheDir, String customCompilerPath) {
         this.cacheDir = cacheDir;
+        this.customCompilerPath = customCompilerPath;
         try {
             Files.createDirectories(cacheDir);
         } catch (IOException e) {
-            throw new MiteException("Failed to create cache directory: " + cacheDir, e);
+            throw new MiteException("Error during cache creation: " + cacheDir, e);
         }
     }
 
@@ -30,7 +34,8 @@ public class CppCompiler {
             return cached.lib;
         }
 
-        Path lib = doCompile(cppFile);
+        Path preprocessed = preprocessAndCompile(cppFile);
+        Path lib = doCompile(preprocessed);
         cache.put(key, new CachedLib(lib, lastModified));
         return lib;
     }
@@ -82,11 +87,6 @@ public class CppCompiler {
             String stderr = new String(p.getErrorStream().readAllBytes());
             int exitCode = p.waitFor();
 
-            System.out.println("CMD: " + String.join(" ", cmd));
-            System.out.println("stdout: " + stdout);
-            System.out.println("stderr: " + stderr);
-            System.out.println("Exit code: " + exitCode);
-
             if (exitCode != 0) throw new MiteException("Compilation error:\n" + stdout + "\n" + stderr);
             return out;
         } catch (IOException | InterruptedException e) {
@@ -96,6 +96,13 @@ public class CppCompiler {
     }
 
     private String findCompiler() {
+        
+        if (customCompilerPath != null && !customCompilerPath.isBlank()) {
+            return customCompilerPath;
+        }
+
+
+
         List<String> candidates = List.of(
                 "g++",
                 "clang++",
@@ -113,8 +120,50 @@ public class CppCompiler {
             } catch (Exception ignored) {}
         }
         throw new MiteException(
-                "C++ compiler does not found. Install g++ or clang++ and add to PATH."
+                "C++ compiler not found. Please install g++ or clang++, " +
+                        "or specify the path explicitly: kebab.compiler-path=C:\\path\\to\\g++.exe"
         );
+    }
+
+
+    private Path preprocessAndCompile(Path cppFile) {
+        try {
+            List<String> lines = Files.readAllLines(cppFile);
+            List<String> result = new ArrayList<>();
+            result.add("#include <string>");
+            result.add("#include <cstring>");
+            result.add("");
+
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                String trimmed = line.trim();
+
+                if (trimmed.equals("// @mite") && i + 1 < lines.size()) {
+                    String next = lines.get(i + 1).trim();
+
+                    if (next.contains("std::string")) {
+                        result.add(line);
+                        result.add(lines.get(i + 1));
+                        i++;
+                        continue;
+                    }
+                    if (!next.startsWith("extern")) {
+                        result.add(line);
+                        result.add("extern \"C\" " + lines.get(i + 1));
+                        i++;
+                        continue;
+                    }
+                }
+                result.add(line);
+            }
+
+            Path temp = cacheDir.resolve(cppFile.getFileName());
+            Files.write(temp, result);
+            return temp;
+
+        } catch (IOException e) {
+            throw new MiteException("Preprocessing error: " + cppFile, e);
+        }
     }
 
     private long lastModified(Path f) {

@@ -9,6 +9,7 @@ import org.example.scanner.FunctionRegistry.ResolvedFunction;
 import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 
 public class DefaultCppEngine implements CppEngine {
@@ -25,13 +26,17 @@ public class DefaultCppEngine implements CppEngine {
     @Override
     public Object execute(String functionName, Object... args) {
         ResolvedFunction resolved = registry.resolve(functionName, args)
-                .orElseThrow(() -> new MiteException(
-                        "Function '" + functionName + "' with such argument types not found. " +
-                                "Check that the function is marked with // @mite in cppScripts."
-                ));
+                .orElseThrow(() -> {
+                    String argTypes = Arrays.stream(args)
+                            .map(a -> a == null ? "null" : a.getClass().getSimpleName())
+                            .collect(java.util.stream.Collectors.joining(", "));
+                    return new MiteException(
+                            "Function '" + functionName + "(" + argTypes + ")' not found. " +
+                                    "Check // @mite annotation and argument types in cppScripts."
+                    );
+                });
 
         Path lib = compiler.compile(resolved.file());
-
         return invoke(lib, resolved.signature(), args);
     }
 
@@ -77,6 +82,7 @@ public class DefaultCppEngine implements CppEngine {
             case "float"       -> ValueLayout.JAVA_FLOAT;
             case "bool"        -> ValueLayout.JAVA_BOOLEAN;
             case "std::string" -> ValueLayout.ADDRESS;
+            case "const char*" -> ValueLayout.ADDRESS;
             case "void"        -> null;
             default -> throw new MiteException("Unknown type: " + cppType);
         };
@@ -85,9 +91,9 @@ public class DefaultCppEngine implements CppEngine {
     private Object[] marshalArgs(Object[] args, List<String> paramTypes, Arena arena) {
         Object[] result = new Object[args.length];
         for (int i = 0; i < args.length; i++) {
-            if ("std::string".equals(paramTypes.get(i))) {
-                String s = (String) args[i];
-                result[i] = arena.allocateFrom(s);
+            String type = paramTypes.get(i);
+            if ("std::string".equals(type) || "const char*".equals(type)) {
+                result[i] = arena.allocateFrom((String) args[i]);
             } else {
                 result[i] = args[i];
             }
@@ -96,6 +102,13 @@ public class DefaultCppEngine implements CppEngine {
     }
 
     private Object unmarshalResult(Object result, String returnType) {
+        if (result instanceof MemorySegment seg &&
+                ("const char*".equals(returnType) || "std::string".equals(returnType))) {
+            MemorySegment safe = seg.reinterpret(4096);
+            long len = 0;
+            while (len < 4096 && safe.get(ValueLayout.JAVA_BYTE, len) != 0) len++;
+            return new String(safe.asSlice(0, len).toArray(ValueLayout.JAVA_BYTE));
+        }
         return result;
     }
 }

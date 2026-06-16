@@ -1,6 +1,7 @@
 package org.example.config;
 
 import org.example.compiler.CppCompiler;
+import org.example.compiler.MiteException;
 import org.example.engine.CppEngine;
 import org.example.engine.DefaultCppEngine;
 import org.example.scanner.FunctionRegistry;
@@ -16,7 +17,7 @@ public class MiteAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public CppCompiler cppCompiler(MiteProperties props) {
-        return new CppCompiler(props.getCacheDir());
+        return new CppCompiler(props.getCacheDir(), props.getCompilerPath());
     }
 
     @Bean

@@ -3,29 +3,32 @@ package org.example.scanner;
 import org.example.parser.CppParser;
 import org.example.parser.FunctionSignature;
 
+import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
-import java.io.IOException;
-
+import java.util.concurrent.ConcurrentHashMap;
 
 public class FunctionRegistry {
 
     private final Path scriptsDir;
     private final CppParser parser = new CppParser();
-
-    private final Map<String, List<ResolvedFunction>> index = new HashMap<>();
+    private final Map<String, List<ResolvedFunction>> index = new ConcurrentHashMap<>();
 
     public FunctionRegistry(Path scriptsDir) {
         this.scriptsDir = scriptsDir;
         scan();
+        startWatcher();
     }
 
     private void scan() {
+        index.clear();
         try (var stream = Files.walk(scriptsDir)) {
             stream.filter(p -> p.toString().endsWith(".cpp"))
-                    .forEach(this::indexFile);
+                    .forEach(p -> {
+                        indexFile(p);
+                    });
         } catch (IOException e) {
-            throw new RuntimeException("Failed to scan directory: " + scriptsDir, e);
+            throw new RuntimeException("Error during directory scan: " + scriptsDir, e);
         }
     }
 
@@ -37,6 +40,29 @@ public class FunctionRegistry {
         }
     }
 
+    private void startWatcher() {
+        Thread watcher = new Thread(() -> {
+            try {
+                WatchService watchService = FileSystems.getDefault().newWatchService();
+                scriptsDir.register(watchService,
+                        StandardWatchEventKinds.ENTRY_CREATE,
+                        StandardWatchEventKinds.ENTRY_MODIFY,
+                        StandardWatchEventKinds.ENTRY_DELETE);
+
+                while (true) {
+                    WatchKey key = watchService.take();
+                    key.pollEvents();
+                    System.out.println("[MITE] Change in cppScripts — rescan...");
+                    scan();
+                    key.reset();
+                }
+            } catch (IOException | InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        watcher.setDaemon(true);
+        watcher.start();
+    }
 
     public Optional<ResolvedFunction> resolve(String name, Object[] args) {
         List<ResolvedFunction> overloads = index.get(name);
@@ -50,7 +76,6 @@ public class FunctionRegistry {
     private boolean matches(FunctionSignature sig, Object[] args) {
         List<String> paramTypes = sig.paramTypes();
         if (paramTypes.size() != args.length) return false;
-
         for (int i = 0; i < args.length; i++) {
             if (!typeMatches(paramTypes.get(i), args[i])) return false;
         }
@@ -65,6 +90,7 @@ public class FunctionRegistry {
             case "float"       -> arg instanceof Float;
             case "bool"        -> arg instanceof Boolean;
             case "std::string" -> arg instanceof String;
+            case "const char*" -> arg instanceof String;
             default            -> false;
         };
     }

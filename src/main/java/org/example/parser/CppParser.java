@@ -8,11 +8,11 @@ import java.util.regex.*;
 public class CppParser {
 
     private static final Set<String> SUPPORTED_TYPES = Set.of(
-            "int", "long", "double", "float", "bool", "std::string", "void"
+            "int", "long", "double", "float", "bool", "std::string", "void", "const char*"
     );
 
     private static final Pattern SIGNATURE_PATTERN = Pattern.compile(
-            "^\\s*(?:extern\\s+\"C\"\\s+)?(\\w[\\w:]*?)\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*\\{?"
+            "^\\s*(?:extern\\s+\"C\"\\s+)?(const\\s+char\\s*\\*|\\w[\\w:]*?)\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*\\{?"
     );
 
 
@@ -23,13 +23,10 @@ public class CppParser {
 
             for (int i = 0; i < lines.size() - 1; i++) {
                 String line = lines.get(i).trim();
-                System.out.println("LINE [" + i + "]: '" + line + "' match=" + line.equals("// @mite"));
                 if (!line.equals("// @mite")) continue;
 
                 String next = lines.get(i + 1);
-                System.out.println("NEXT: '" + next + "'");
                 Optional<FunctionSignature> sig = parseSignature(next);
-                System.out.println("SIG: " + sig);
                 sig.ifPresent(result::add);
             }
 
@@ -69,6 +66,8 @@ public class CppParser {
     }
 
     private String extractType(String param) {
+        if (param.matches("const\\s+char\\s*\\*.*")) return "const char*";
+
         param = param.replaceAll("\\bconst\\b", "").replaceAll("[&*]", "").trim();
 
         if (param.startsWith("std::string")) return "std::string";

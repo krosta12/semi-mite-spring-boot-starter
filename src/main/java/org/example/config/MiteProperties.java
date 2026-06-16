@@ -9,6 +9,11 @@ public class MiteProperties {
     private Path cacheDir = Path.of(".mite-cache");
     private Path scriptsDir = Path.of("cppScripts");
 
+    private String compilerPath = null;
+
+    public String getCompilerPath() { return compilerPath; }
+    public void setCompilerPath(String compilerPath) { this.compilerPath = compilerPath; }
+
     public Path getCacheDir() { return cacheDir; }
     public void setCacheDir(Path cacheDir) { this.cacheDir = cacheDir; }
 
