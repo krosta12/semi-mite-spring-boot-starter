@@ -164,9 +164,8 @@ public class DefaultCppEngine implements CppEngine {
             if ("std::string".equals(type) || "const char*".equals(type)) {
                 result[i] = arena.allocateFrom((String) args[i]);
             } else if (type.endsWith("*")) {
-                // Если прилетел список — выделяем под него нативный массив чисел
-                List<?> list = (List<?>) args[i];
-                result[i] = allocateNativeArray(list, type, arena);
+                java.util.Collection<?> collection = (java.util.Collection<?>) args[i];
+                result[i] = allocateNativeArray(collection, type, arena);
             } else {
                 result[i] = args[i];
             }
@@ -187,24 +186,27 @@ public class DefaultCppEngine implements CppEngine {
 
 
 
-    private MemorySegment allocateNativeArray(List<?> list, String cppType, Arena arena) {
-        int size = list.size();
+    private MemorySegment allocateNativeArray(java.util.Collection<?> collection, String cppType, Arena arena) {
+        int size = collection.size();
         return switch (cppType) {
             case "int*", "int32_t*" -> {
-                int[] arr = list.stream().mapToInt(x -> ((Number) x).intValue()).toArray();
+                int[] arr = collection.stream().mapToInt(x -> ((Number) x).intValue()).toArray();
                 yield arena.allocateFrom(ValueLayout.JAVA_INT, arr);
             }
             case "long long*", "int64_t*" -> {
-                long[] arr = list.stream().mapToLong(x -> ((Number) x).longValue()).toArray();
+                long[] arr = collection.stream().mapToLong(x -> ((Number) x).longValue()).toArray();
                 yield arena.allocateFrom(ValueLayout.JAVA_LONG, arr);
             }
             case "double*" -> {
-                double[] arr = list.stream().mapToDouble(x -> ((Number) x).doubleValue()).toArray();
+                double[] arr = collection.stream().mapToDouble(x -> ((Number) x).doubleValue()).toArray();
                 yield arena.allocateFrom(ValueLayout.JAVA_DOUBLE, arr);
             }
             case "float*" -> {
                 float[] arr = new float[size];
-                for (int i = 0; i < size; i++) arr[i] = ((Number) list.get(i)).floatValue();
+                int i = 0;
+                for (Object x : collection) {
+                    arr[i++] = ((Number) x).floatValue();
+                }
                 yield arena.allocateFrom(ValueLayout.JAVA_FLOAT, arr);
             }
             default -> throw new MiteException("Unsupported array type for marshalling: " + cppType);

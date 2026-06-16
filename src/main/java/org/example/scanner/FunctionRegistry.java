@@ -100,7 +100,8 @@ public class FunctionRegistry {
 
             case "std::string", "const char*" -> arg instanceof String;
 
-            case "int*", "int32_t*", "long long*", "int64_t*", "double*", "float*" -> arg instanceof java.util.List;
+            case "int*", "int32_t*", "long long*", "int64_t*", "double*", "float*" ->
+                    arg instanceof java.util.Collection;
 
             default -> false;
         };
