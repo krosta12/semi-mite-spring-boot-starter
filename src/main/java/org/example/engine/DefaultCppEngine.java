@@ -4,14 +4,12 @@ import org.example.compiler.CppCompiler;
 import org.example.compiler.MiteException;
 import org.example.parser.FunctionSignature;
 import org.example.scanner.FunctionRegistry;
-import org.example.scanner.FunctionRegistry.ResolvedFunction;
 
 import java.io.IOException;
 import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 
@@ -32,21 +30,23 @@ public class DefaultCppEngine implements CppEngine {
 
     @Override
     public Object execute(String functionName, Object... args) {
-        ResolvedFunction resolved = registry.resolve(functionName, args)
+        final Object[] finalArgs = (args == null) ? new Object[]{null} : args;
+
+        FunctionRegistry.ResolvedFunction resolved = registry.resolve(functionName, finalArgs)
                 .orElseThrow(() -> {
-                    String argTypes = Arrays.stream(args)
-                            .map(a -> a == null ? "null" : a.getClass().getSimpleName())
+                    String argTypes = java.util.Arrays.stream(finalArgs)
+                            .map(arg -> arg == null ? "null" : arg.getClass().getSimpleName())
                             .collect(java.util.stream.Collectors.joining(", "));
-                    return new MiteException(
-                            "Function '" + functionName + "(" + argTypes + ")' not found. " +
-                                    "Check // @mite annotation and argument types in cppScripts."
-                    );
+                    return new MiteException("Function '" + functionName + "(" + argTypes + ")' not found.");
                 });
 
-        Path lib = getOrCompile(resolved.file());
-        return invoke(lib, resolved.signature(), args);
+        return invoke(resolved, finalArgs);
     }
 
+    private Object invoke(FunctionRegistry.ResolvedFunction resolved, Object[] args) {
+        Path libPath = getOrCompile(resolved.file());
+        return invoke(libPath, resolved.signature(), args);
+    }
 
     private synchronized Path getOrCompile(Path cppFile) {
         try {
@@ -61,12 +61,10 @@ public class DefaultCppEngine implements CppEngine {
 
                 Path libPath = Path.of(libPathStr);
 
-
                 if (currentModified == cachedModified && Files.exists(libPath)) {
                     return libPath;
                 }
             }
-
 
             Path lib = compiler.compile(cppFile);
 
@@ -102,6 +100,10 @@ public class DefaultCppEngine implements CppEngine {
     }
 
     private Object invoke(Path lib, FunctionSignature sig, Object[] args) {
+        if (args == null) {
+            args = new Object[]{null};
+        }
+
         SymbolLookup lookup = SymbolLookup.libraryLookup(lib, Arena.global());
 
         MemorySegment fn = lookup.find(sig.name())
@@ -138,7 +140,6 @@ public class DefaultCppEngine implements CppEngine {
     }
 
     private MemoryLayout toLayout(String cppType) {
-
         if (cppType != null && cppType.endsWith("*")) {
             return ValueLayout.ADDRESS;
         }
@@ -152,11 +153,9 @@ public class DefaultCppEngine implements CppEngine {
             case "double" -> ValueLayout.JAVA_DOUBLE;
             case "bool" -> ValueLayout.JAVA_BOOLEAN;
 
-
             case "std::string", "const char*", "int*", "int32_t*", "long long*", "int64_t*", "double*", "float*" ->
                     ValueLayout.ADDRESS;
             case "void" -> null;
-
 
             default -> throw new MiteException("Unknown type: " + cppType);
         };
@@ -167,7 +166,7 @@ public class DefaultCppEngine implements CppEngine {
         for (int i = 0; i < args.length; i++) {
             String type = paramTypes.get(i);
             if ("std::string".equals(type) || "const char*".equals(type)) {
-                result[i] = arena.allocateFrom((String) args[i]);
+                result[i] = args[i] == null ? MemorySegment.NULL : arena.allocateFrom((String) args[i]);
             } else if (type.endsWith("*")) {
                 if (args[i] instanceof java.util.Collection) {
                     result[i] = allocateNativeArray((java.util.Collection<?>) args[i], type, arena);
@@ -182,17 +181,19 @@ public class DefaultCppEngine implements CppEngine {
     }
 
     private Object unmarshalResult(Object result, String returnType) {
-        if (result instanceof MemorySegment seg &&
-                ("const char*".equals(returnType) || "std::string".equals(returnType))) {
-            MemorySegment safe = seg.reinterpret(4096);
-            long len = 0;
-            while (len < 4096 && safe.get(ValueLayout.JAVA_BYTE, len) != 0) len++;
-            return new String(safe.asSlice(0, len).toArray(ValueLayout.JAVA_BYTE));
+        if (result instanceof MemorySegment seg) {
+            if (seg.address() == 0) {
+                return null;
+            }
+            if ("const char*".equals(returnType) || "std::string".equals(returnType)) {
+                MemorySegment safe = seg.reinterpret(4096);
+                long len = 0;
+                while (len < 4096 && safe.get(ValueLayout.JAVA_BYTE, len) != 0) len++;
+                return new String(safe.asSlice(0, len).toArray(ValueLayout.JAVA_BYTE));
+            }
         }
         return result;
     }
-
-
 
     private MemorySegment allocateNativeArray(java.util.Collection<?> collection, String cppType, Arena arena) {
         int size = collection.size();
@@ -220,8 +221,6 @@ public class DefaultCppEngine implements CppEngine {
             default -> throw new MiteException("Unsupported array type for marshalling: " + cppType);
         };
     }
-
-
 
     private MemorySegment marshalCustomObject(Object obj, Arena arena) {
         if (obj == null) return MemorySegment.NULL;

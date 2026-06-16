@@ -102,4 +102,60 @@ class FunctionRegistryTest {
         assertTrue(registry.resolve("add", new Object[]{1, 2}).isPresent());
         assertTrue(registry.resolve("greet", new Object[]{"test"}).isPresent());
     }
+
+    static class TestUser {
+        long id;
+    }
+
+    @Test
+    void matchesCollectionToPrimitivePointer(@TempDir Path dir) throws IOException {
+        Files.writeString(dir.resolve("test.cpp"), """
+                // @mite
+                int sumArray(int* arr, int size)
+                {
+                    return 0;
+                }
+                """);
+
+        FunctionRegistry registry = new FunctionRegistry(dir);
+
+        java.util.List<Integer> list = java.util.List.of(1, 2, 3);
+        Optional<FunctionRegistry.ResolvedFunction> result = registry.resolve("sumArray", new Object[]{list, list.size()});
+
+        assertTrue(result.isPresent(), "Registry should match Java Collection to C++ int*");
+    }
+
+    @Test
+    void matchesCustomObjectToPointer(@TempDir Path dir) throws IOException {
+        Files.writeString(dir.resolve("test.cpp"), """
+                // @mite
+                void process(TestUser* user)
+                {
+                }
+                """);
+
+        FunctionRegistry registry = new FunctionRegistry(dir);
+
+        TestUser user = new TestUser();
+        Optional<FunctionRegistry.ResolvedFunction> result = registry.resolve("process", new Object[]{user});
+
+        assertTrue(result.isPresent(), "Registry should match Java TestUser object to C++ TestUser*");
+    }
+
+    @Test
+    void returnsEmptyForWrongCustomObject(@TempDir Path dir) throws IOException {
+        Files.writeString(dir.resolve("test.cpp"), """
+                // @mite
+                void process(TestUser* user)
+                {
+                }
+                """);
+
+        FunctionRegistry registry = new FunctionRegistry(dir);
+
+        Object wrongObject = new Object();
+        Optional<FunctionRegistry.ResolvedFunction> result = registry.resolve("process", new Object[]{wrongObject});
+
+        assertTrue(result.isEmpty(), "Registry should reject object with mismatched class name");
+    }
 }

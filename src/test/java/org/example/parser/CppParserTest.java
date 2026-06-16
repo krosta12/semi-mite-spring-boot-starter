@@ -162,4 +162,53 @@ class CppParserTest {
         assertEquals("add", sigs.get(1).name());
         assertNotEquals(sigs.get(0).returnType(), sigs.get(1).returnType());
     }
+
+    @Test
+    void parsesPrimitivePointers(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("test.cpp");
+        Files.writeString(file, """
+                // @mite
+                int sumArray(int* arr, int size)
+                {
+                    return 0;
+                }
+                
+                // @mite
+                double processDoubles(double * arr, int size)
+                {
+                    return 0.0;
+                }
+                """);
+
+        List<FunctionSignature> sigs = parser.parse(file);
+
+        assertEquals(2, sigs.size());
+        assertEquals(List.of("int*", "int"), sigs.get(0).paramTypes());
+
+        assertEquals(List.of("double*", "int"), sigs.get(1).paramTypes());
+    }
+
+    @Test
+    void parsesCustomObjectPointers(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("test.cpp");
+        Files.writeString(file, """
+                // @mite
+                void printUser(User* user)
+                {
+                }
+                
+                // @mite
+                Order* createOrder(Order* order)
+                {
+                    return order;
+                }
+                """);
+
+        List<FunctionSignature> sigs = parser.parse(file);
+
+        assertEquals(2, sigs.size());
+        assertEquals("User*", sigs.get(0).paramTypes().get(0));
+        assertEquals("Order*", sigs.get(1).returnType());
+        assertEquals("Order*", sigs.get(1).paramTypes().get(0));
+    }
 }

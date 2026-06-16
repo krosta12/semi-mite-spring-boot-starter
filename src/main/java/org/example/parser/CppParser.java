@@ -90,6 +90,9 @@ public class CppParser {
         int lastSpace = param.lastIndexOf(' ');
         if (lastSpace != -1) {
             String typeCandidate = param.substring(0, lastSpace).trim();
+
+            typeCandidate = typeCandidate.replaceAll("\\s+\\*", "*");
+
             if (isPointer && !typeCandidate.endsWith("*")) {
                 typeCandidate += "*";
             }

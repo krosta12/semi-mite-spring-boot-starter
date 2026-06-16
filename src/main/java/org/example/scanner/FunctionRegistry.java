@@ -77,9 +77,23 @@ public class FunctionRegistry {
     private boolean matches(FunctionSignature sig, Object[] args) {
         List<String> paramTypes = sig.paramTypes();
         if (paramTypes.size() != args.length) return false;
+
         for (int i = 0; i < args.length; i++) {
-            if (!typeMatches(paramTypes.get(i), args[i])) return false;
+            String paramType = paramTypes.get(i);
+            Object arg = args[i];
+
+            if (arg == null) {
+                if (!paramType.endsWith("*") && !paramType.equals("const char*")) {
+                    return false;
+                }
+                continue;
+            }
+
+            if (!typeMatches(paramType, arg)) {
+                return false;
+            }
         }
+
         return true;
     }
 
