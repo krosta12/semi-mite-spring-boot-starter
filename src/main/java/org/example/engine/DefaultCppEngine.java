@@ -79,14 +79,28 @@ public class DefaultCppEngine implements CppEngine {
 
     private MemoryLayout toLayout(String cppType) {
         return switch (cppType) {
-            case "int"         -> ValueLayout.JAVA_INT;
-            case "long"        -> ValueLayout.JAVA_LONG;
-            case "double"      -> ValueLayout.JAVA_DOUBLE;
+            case "int8_t", "uint8_t", "char", "unsigned char"
+                    -> ValueLayout.JAVA_BYTE;
+
+            case "int16_t", "uint16_t", "short", "unsigned short"
+                    -> ValueLayout.JAVA_SHORT;
+
+            case "int", "unsigned int", "int32_t", "uint32_t"
+                    -> ValueLayout.JAVA_INT;
+
+            case "long long", "unsigned long long", "int64_t", "uint64_t"
+                    -> ValueLayout.JAVA_LONG;
+
             case "float"       -> ValueLayout.JAVA_FLOAT;
+            case "double"      -> ValueLayout.JAVA_DOUBLE;
+
             case "bool"        -> ValueLayout.JAVA_BOOLEAN;
-            case "std::string" -> ValueLayout.ADDRESS;
-            case "const char*" -> ValueLayout.ADDRESS;
+
+            case "std::string", "const char*", "void*", "uintptr_t"
+                    -> ValueLayout.ADDRESS;
+
             case "void"        -> null;
+
             default -> throw new MiteException("Unknown type: " + cppType);
         };
     }
