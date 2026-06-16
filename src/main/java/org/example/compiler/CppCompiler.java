@@ -2,6 +2,8 @@ package org.example.compiler;
 
 import java.io.IOException;
 import java.nio.file.*;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -15,7 +17,7 @@ public class CppCompiler {
         try {
             Files.createDirectories(cacheDir);
         } catch (IOException e) {
-            throw new KebabException("Failed to create cache directory: " + cacheDir, e);
+            throw new MiteException("Failed to create cache directory: " + cacheDir, e);
         }
     }
 
@@ -39,13 +41,13 @@ public class CppCompiler {
         if (cached != null) return cached.lib;
 
         try {
-            Path tmp = Files.createTempFile(cacheDir, "kebab_inline_", ".cpp");
+            Path tmp = Files.createTempFile(cacheDir, "mite_inline_", ".cpp");
             Files.writeString(tmp, code);
             Path lib = doCompile(tmp);
             cache.put(key, new CachedLib(lib, -1));
             return lib;
         } catch (IOException e) {
-            throw new KebabException("Inline code writing error", e);
+            throw new MiteException("Inline code writing error", e);
         }
     }
 
@@ -56,28 +58,63 @@ public class CppCompiler {
         Path out = cacheDir.resolve(libName);
 
         String compiler = findCompiler();
-        String[] cmd = win
-                ? new String[]{compiler, "-shared", "-o", out.toString(), cppFile.toString()}
-                : new String[]{compiler, "-shared", "-fPIC", "-O2", "-o", out.toString(), cppFile.toString()};
+
+        List<String> cmd = new ArrayList<>();
+        cmd.add(compiler);
+        cmd.add("-shared");
+        if (!win) cmd.add("-fPIC");
+        cmd.add("-O2");
+        if (win) cmd.add("-Wl,--kill-at");
+        cmd.add("-o");
+        cmd.add(out.toAbsolutePath().toString());
+        cmd.add(cppFile.toAbsolutePath().toString());
 
         try {
-            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-            String output = new String(p.getInputStream().readAllBytes());
-            if (p.waitFor() != 0) throw new KebabException("Compilation error C++:\n" + output);
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            if (win) {
+                pb.environment().put("PATH",
+                        "C:\\msys64\\ucrt64\\bin;" + pb.environment().getOrDefault("PATH", ""));
+            }
+            pb.redirectErrorStream(false);
+            Process p = pb.start();
+
+            String stdout = new String(p.getInputStream().readAllBytes());
+            String stderr = new String(p.getErrorStream().readAllBytes());
+            int exitCode = p.waitFor();
+
+            System.out.println("CMD: " + String.join(" ", cmd));
+            System.out.println("stdout: " + stdout);
+            System.out.println("stderr: " + stderr);
+            System.out.println("Exit code: " + exitCode);
+
+            if (exitCode != 0) throw new MiteException("Compilation error:\n" + stdout + "\n" + stderr);
             return out;
         } catch (IOException | InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new KebabException("Failed to start compiler: " + compiler, e);
+            throw new MiteException("Failed to start compiler: " + compiler, e);
         }
     }
 
     private String findCompiler() {
-        for (String c : new String[]{"clang++", "g++"}) {
+        List<String> candidates = List.of(
+                "g++",
+                "clang++",
+                "C:\\msys64\\ucrt64\\bin\\g++.exe",
+                "C:\\msys64\\mingw64\\bin\\g++.exe"
+        );
+
+        for (String c : candidates) {
             try {
-                if (new ProcessBuilder(c, "--version").start().waitFor() == 0) return c;
+                Process p = new ProcessBuilder(c, "--version")
+                        .redirectErrorStream(true)
+                        .start();
+                p.waitFor();
+                if (p.exitValue() == 0) return c;
             } catch (Exception ignored) {}
         }
-        throw new KebabException("Не найден clang++ или g++ в PATH");
+        throw new MiteException(
+                "C++ compiler does not found. Install g++ or clang++ and add to PATH."
+        );
     }
 
     private long lastModified(Path f) {

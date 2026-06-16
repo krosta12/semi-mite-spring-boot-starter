@@ -2,7 +2,7 @@ plugins {
     id 'java-library'
 }
 
-group = 'com.kebab'
+group = 'com.mite'
 version = '1.0.0'
 
 repositories {
