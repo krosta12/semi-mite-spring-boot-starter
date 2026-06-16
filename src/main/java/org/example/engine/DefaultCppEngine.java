@@ -45,8 +45,7 @@ public class DefaultCppEngine implements CppEngine {
 
         MemorySegment fn = lookup.find(sig.name())
                 .orElseThrow(() -> new MiteException(
-                        "Symbol '" + sig.name() + "' not found in the compiled library. " +
-                                "Add extern \"C\" before the function."
+                        "Symbol '" + sig.name() + "' not found. Add extern \"C\" before the function."
                 ));
 
         FunctionDescriptor descriptor = buildDescriptor(sig);
@@ -54,10 +53,14 @@ public class DefaultCppEngine implements CppEngine {
 
         try (Arena arena = Arena.ofConfined()) {
             Object[] nativeArgs = marshalArgs(args, sig.paramTypes(), arena);
+            if ("void".equals(sig.returnType())) {
+                handle.invokeWithArguments(nativeArgs);
+                return null;
+            }
             Object result = handle.invokeWithArguments(nativeArgs);
             return unmarshalResult(result, sig.returnType());
         } catch (Throwable e) {
-            throw new MiteException("Error calling function '" + sig.name() + "': " + e.getMessage(), e);
+            throw new MiteException("Error calling '" + sig.name() + "': " + e.getMessage(), e);
         }
     }
 

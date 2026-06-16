@@ -96,19 +96,18 @@ public class CppCompiler {
     }
 
     private String findCompiler() {
-        
         if (customCompilerPath != null && !customCompilerPath.isBlank()) {
             return customCompilerPath;
         }
 
+        List<String> candidates = new ArrayList<>();
 
+        candidates.add("g++");
+        candidates.add("clang++");
 
-        List<String> candidates = List.of(
-                "g++",
-                "clang++",
-                "C:\\msys64\\ucrt64\\bin\\g++.exe",
-                "C:\\msys64\\mingw64\\bin\\g++.exe"
-        );
+        if (System.getProperty("os.name").toLowerCase().contains("win")) {
+            candidates.addAll(findWindowsCompilers());
+        }
 
         for (String c : candidates) {
             try {
@@ -119,10 +118,50 @@ public class CppCompiler {
                 if (p.exitValue() == 0) return c;
             } catch (Exception ignored) {}
         }
+
         throw new MiteException(
-                "C++ compiler not found. Please install g++ or clang++, " +
-                        "or specify the path explicitly: kebab.compiler-path=C:\\path\\to\\g++.exe"
+                "C++ compiler not found. Install g++ or clang++ and add to PATH, " +
+                        "or specify explicitly: mite.compiler-path=C:\\path\\to\\g++.exe"
         );
+    }
+
+    private List<String> findWindowsCompilers() {
+        List<String> found = new ArrayList<>();
+
+        List<String> msys2Roots = List.of(
+                "C:\\msys64",
+                "C:\\msys2",
+                System.getenv().getOrDefault("MSYS2_ROOT", ""),
+                System.getProperty("user.home") + "\\msys64"
+        );
+
+        List<String> msys2SubDirs = List.of(
+                "ucrt64\\bin\\g++.exe",
+                "mingw64\\bin\\g++.exe",
+                "mingw32\\bin\\g++.exe",
+                "clang64\\bin\\clang++.exe"
+        );
+
+        for (String root : msys2Roots) {
+            if (root.isBlank()) continue;
+            for (String sub : msys2SubDirs) {
+                Path path = Path.of(root, sub);
+                if (Files.exists(path)) {
+                    found.add(path.toString());
+                }
+            }
+        }
+
+        String userHome = System.getProperty("user.home");
+        List<String> scoopPaths = List.of(
+                userHome + "\\scoop\\apps\\gcc\\current\\bin\\g++.exe",
+                userHome + "\\scoop\\apps\\llvm\\current\\bin\\clang++.exe"
+        );
+        for (String p : scoopPaths) {
+            if (Files.exists(Path.of(p))) found.add(p);
+        }
+
+        return found;
     }
 
 
@@ -140,19 +179,15 @@ public class CppCompiler {
 
                 if (trimmed.equals("// @mite") && i + 1 < lines.size()) {
                     String next = lines.get(i + 1).trim();
+                    result.add(line);
 
-                    if (next.contains("std::string")) {
-                        result.add(line);
+                    if (next.startsWith("extern")) {
                         result.add(lines.get(i + 1));
-                        i++;
-                        continue;
-                    }
-                    if (!next.startsWith("extern")) {
-                        result.add(line);
+                    } else {
                         result.add("extern \"C\" " + lines.get(i + 1));
-                        i++;
-                        continue;
                     }
+                    i++;
+                    continue;
                 }
                 result.add(line);
             }

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -17,75 +18,15 @@ class CppEngineIntegrationTest {
 
     private static final Path CACHE_DIR = Path.of(System.getProperty("java.io.tmpdir"), "mite-test-cache");
 
-    @TempDir Path scriptsDir;
-
     private CppEngine engine;
 
     @BeforeEach
-    void setUp() throws IOException {
+    void setUp() throws IOException, URISyntaxException {
         Files.createDirectories(CACHE_DIR);
-        Files.writeString(scriptsDir.resolve("testUtils.cpp"), """
-                #include <string>
-                #include <cmath>
-                
-                // @mite
-                int add(int a, int b)
-                {
-                    return a + b;
-                }
-                
-                // @mite
-                double multiply(double a, double b)
-                {
-                    return a * b;
-                }
-                
-                // @mite
-                bool isPositive(int n)
-                {
-                    return n > 0;
-                }
-                
-                // @mite
-                const char* greet(const char* name)
-                {
-                    static std::string result;
-                    result = std::string("Hello, ") + name + "!";
-                    return result.c_str();
-                }
-                
-                int square(int n)
-                {
-                    return n * n;
-                }
-                
-                // @mite
-                int sumOfSquares(int a, int b)
-                {
-                    return square(a) + square(b);
-                }
-                
-                // @mite
-                double hypotenuse(double a, double b)
-                {
-                    return sqrt(a * a + b * b);
-                }
-                
-                // @mite
-                int factorial(int n)
-                {
-                    if (n <= 1) return 1;
-                    return n * factorial(n - 1);
-                }
-                
-                // @mite
-                const char* emptyString(const char* s)
-                {
-                    static std::string result;
-                    result = s;
-                    return result.c_str();
-                }
-                """);
+
+        Path scriptsDir = Path.of(
+                getClass().getClassLoader().getResource("cppScripts").toURI()
+        );
 
         CppCompiler compiler = new CppCompiler(CACHE_DIR, null);
         FunctionRegistry registry = new FunctionRegistry(scriptsDir);
@@ -248,4 +189,12 @@ class CppEngineIntegrationTest {
     void helperFunctionNotExposed() {
         assertThrows(MiteException.class, () -> engine.execute("square", 5));
     }
+
+
+    @Test
+    void voidFunctionReturnsNull() {
+        assertNull(engine.execute("noReturn"));
+    }
+
+
 }

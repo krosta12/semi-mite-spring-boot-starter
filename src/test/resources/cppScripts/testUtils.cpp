@@ -20,7 +20,7 @@ bool isPositive(int n)
 }
 
 // @mite
-const char *greet(const char *name)
+const char* greet(const char* name)
 {
     static std::string result;
     result = std::string("Hello, ") + name + "!";
@@ -47,15 +47,19 @@ double hypotenuse(double a, double b)
 // @mite
 int factorial(int n)
 {
-    if (n <= 1)
-        return 1;
+    if (n <= 1) return 1;
     return n * factorial(n - 1);
 }
 
 // @mite
-const char *emptyString(const char *s)
+const char* emptyString(const char* s)
 {
     static std::string result;
     result = s;
     return result.c_str();
+}
+
+// @mite
+void noReturn()
+{
 }

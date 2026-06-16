@@ -21,12 +21,13 @@ public class CppParser {
             List<String> lines = Files.readAllLines(cppFile);
             List<FunctionSignature> result = new ArrayList<>();
 
-            for (int i = 0; i < lines.size() - 1; i++) {
+            for (int i = 0; i + 1 < lines.size(); i++) {
                 String line = lines.get(i).trim();
                 if (!line.equals("// @mite")) continue;
 
                 String next = lines.get(i + 1);
                 Optional<FunctionSignature> sig = parseSignature(next);
+                System.out.println("SIG for '" + next.trim() + "': " + sig);
                 sig.ifPresent(result::add);
             }
 
@@ -53,7 +54,7 @@ public class CppParser {
     }
 
     private List<String> parseParamTypes(String paramsRaw) {
-        if (paramsRaw.isBlank()) return List.of();
+        if (paramsRaw.isBlank() || paramsRaw.trim().equals("void")) return List.of();
 
         List<String> types = new ArrayList<>();
         for (String param : paramsRaw.split(",")) {
@@ -67,9 +68,9 @@ public class CppParser {
 
     private String extractType(String param) {
         if (param.matches("const\\s+char\\s*\\*.*")) return "const char*";
+        if (param.trim().equals("void")) return null;
 
         param = param.replaceAll("\\bconst\\b", "").replaceAll("[&*]", "").trim();
-
         if (param.startsWith("std::string")) return "std::string";
 
         String[] parts = param.split("\\s+");
