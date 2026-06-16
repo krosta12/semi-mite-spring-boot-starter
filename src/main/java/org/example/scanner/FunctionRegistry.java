@@ -83,29 +83,25 @@ public class FunctionRegistry {
 
     private boolean typeMatches(String cppType, Object arg) {
         return switch (cppType) {
-            case "int8_t", "uint8_t", "char", "unsigned char"
-                    -> arg instanceof Byte;
+            case "int8_t", "uint8_t", "char", "unsigned char" -> arg instanceof Byte;
 
-            case "int16_t", "uint16_t", "short", "unsigned short"
-                    -> arg instanceof Short;
+            case "int16_t", "uint16_t", "short", "unsigned short" -> arg instanceof Short;
 
-            case "int", "unsigned int", "int32_t", "uint32_t"
-                    -> arg instanceof Integer;
+            case "int", "unsigned int", "int32_t", "uint32_t" -> arg instanceof Integer;
 
-            case "long", "long long", "unsigned long long", "int64_t", "uint64_t"
-                    -> arg instanceof Long;
+            case "long", "long long", "unsigned long long", "int64_t", "uint64_t" -> arg instanceof Long;
 
-            case "float"       -> arg instanceof Float;
-            case "double"      -> arg instanceof Double;
+            case "float" -> arg instanceof Float;
+            case "double" -> arg instanceof Double;
 
-            case "bool"        -> arg instanceof Boolean;
+            case "bool" -> arg instanceof Boolean;
 
-            case "std::string", "const char*"
-                    -> arg instanceof String;
+            case "std::string", "const char*" -> arg instanceof String;
 
             default -> false;
         };
     }
 
-    public record ResolvedFunction(FunctionSignature signature, Path file) {}
+    public record ResolvedFunction(FunctionSignature signature, Path file) {
+    }
 }

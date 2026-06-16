@@ -6,11 +6,14 @@ import org.example.parser.FunctionSignature;
 import org.example.scanner.FunctionRegistry;
 import org.example.scanner.FunctionRegistry.ResolvedFunction;
 
+import java.io.IOException;
 import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Properties;
 
 public class DefaultCppEngine implements CppEngine {
 
@@ -18,9 +21,13 @@ public class DefaultCppEngine implements CppEngine {
     private final FunctionRegistry registry;
     private final Linker linker = Linker.nativeLinker();
 
+    private final Path cacheFile = Path.of("cppScripts", ".mite_cache.properties");
+    private final Properties cache = new Properties();
+
     public DefaultCppEngine(CppCompiler compiler, FunctionRegistry registry) {
         this.compiler = compiler;
         this.registry = registry;
+        loadCache();
     }
 
     @Override
@@ -36,8 +43,62 @@ public class DefaultCppEngine implements CppEngine {
                     );
                 });
 
-        Path lib = compiler.compile(resolved.file());
+        Path lib = getOrCompile(resolved.file());
         return invoke(lib, resolved.signature(), args);
+    }
+
+
+    private synchronized Path getOrCompile(Path cppFile) {
+        try {
+            String key = cppFile.toAbsolutePath().toString();
+            long currentModified = Files.getLastModifiedTime(cppFile).toMillis();
+
+            String cachedValue = cache.getProperty(key);
+            if (cachedValue != null && cachedValue.contains("|")) {
+                int idx = cachedValue.lastIndexOf('|');
+                String libPathStr = cachedValue.substring(0, idx);
+                long cachedModified = Long.parseLong(cachedValue.substring(idx + 1));
+
+                Path libPath = Path.of(libPathStr);
+
+
+                if (currentModified == cachedModified && Files.exists(libPath)) {
+                    return libPath;
+                }
+            }
+
+
+            Path lib = compiler.compile(cppFile);
+
+            cache.setProperty(key, lib.toAbsolutePath().toString() + "|" + currentModified);
+            saveCache();
+
+            return lib;
+        } catch (IOException e) {
+            throw new MiteException("Failed to handle compilation cache for: " + cppFile, e);
+        }
+    }
+
+    private void loadCache() {
+        if (!Files.exists(cacheFile)) return;
+        try (var reader = Files.newBufferedReader(cacheFile)) {
+            cache.load(reader);
+        } catch (IOException e) {
+            System.err.println("[MITE] Warning: Failed to load compilation cache: " + e.getMessage());
+        }
+    }
+
+    private void saveCache() {
+        try {
+            if (cacheFile.getParent() != null) {
+                Files.createDirectories(cacheFile.getParent());
+            }
+            try (var writer = Files.newBufferedWriter(cacheFile)) {
+                cache.store(writer, "Mite Persistent Compilation Cache");
+            }
+        } catch (IOException e) {
+            System.err.println("[MITE] Warning: Failed to save compilation cache: " + e.getMessage());
+        }
     }
 
     private Object invoke(Path lib, FunctionSignature sig, Object[] args) {
@@ -71,7 +132,6 @@ public class DefaultCppEngine implements CppEngine {
                 .toList();
 
         if (returnLayout == null) {
-            // void
             return FunctionDescriptor.ofVoid(paramLayouts.toArray(new MemoryLayout[0]));
         }
         return FunctionDescriptor.of(returnLayout, paramLayouts.toArray(new MemoryLayout[0]));
@@ -79,28 +139,15 @@ public class DefaultCppEngine implements CppEngine {
 
     private MemoryLayout toLayout(String cppType) {
         return switch (cppType) {
-            case "int8_t", "uint8_t", "char", "unsigned char"
-                    -> ValueLayout.JAVA_BYTE;
-
-            case "int16_t", "uint16_t", "short", "unsigned short"
-                    -> ValueLayout.JAVA_SHORT;
-
-            case "int", "unsigned int", "int32_t", "uint32_t"
-                    -> ValueLayout.JAVA_INT;
-
-            case "long long", "unsigned long long", "int64_t", "uint64_t"
-                    -> ValueLayout.JAVA_LONG;
-
-            case "float"       -> ValueLayout.JAVA_FLOAT;
-            case "double"      -> ValueLayout.JAVA_DOUBLE;
-
-            case "bool"        -> ValueLayout.JAVA_BOOLEAN;
-
-            case "std::string", "const char*", "void*", "uintptr_t"
-                    -> ValueLayout.ADDRESS;
-
-            case "void"        -> null;
-
+            case "int8_t", "uint8_t", "char", "unsigned char" -> ValueLayout.JAVA_BYTE;
+            case "int16_t", "uint16_t", "short", "unsigned short" -> ValueLayout.JAVA_SHORT;
+            case "int", "unsigned int", "int32_t", "uint32_t" -> ValueLayout.JAVA_INT;
+            case "long", "long long", "unsigned long long", "int64_t", "uint64_t" -> ValueLayout.JAVA_LONG;
+            case "float" -> ValueLayout.JAVA_FLOAT;
+            case "double" -> ValueLayout.JAVA_DOUBLE;
+            case "bool" -> ValueLayout.JAVA_BOOLEAN;
+            case "std::string", "const char*" -> ValueLayout.ADDRESS;
+            case "void" -> null;
             default -> throw new MiteException("Unknown type: " + cppType);
         };
     }

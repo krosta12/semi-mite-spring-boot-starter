@@ -116,7 +116,8 @@ public class CppCompiler {
                         .start();
                 p.waitFor();
                 if (p.exitValue() == 0) return c;
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
 
         throw new MiteException(
@@ -202,9 +203,13 @@ public class CppCompiler {
     }
 
     private long lastModified(Path f) {
-        try { return Files.getLastModifiedTime(f).toMillis(); }
-        catch (IOException e) { return -1; }
+        try {
+            return Files.getLastModifiedTime(f).toMillis();
+        } catch (IOException e) {
+            return -1;
+        }
     }
 
-    private record CachedLib(Path lib, long timestamp) {}
+    private record CachedLib(Path lib, long timestamp) {
+    }
 }
