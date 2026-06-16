@@ -22,13 +22,12 @@ public class FunctionRegistry {
 
     private void scan() {
         index.clear();
+        if (!Files.exists(scriptsDir)) return;
         try (var stream = Files.walk(scriptsDir)) {
             stream.filter(p -> p.toString().endsWith(".cpp"))
-                    .forEach(p -> {
-                        indexFile(p);
-                    });
+                    .forEach(this::indexFile);
         } catch (IOException e) {
-            throw new RuntimeException("Error during directory scan: " + scriptsDir, e);
+            throw new RuntimeException("Could not scan directory: " + scriptsDir, e);
         }
     }
 
