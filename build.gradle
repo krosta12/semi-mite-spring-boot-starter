@@ -33,3 +33,16 @@ test {
     jvmArgs '--enable-native-access=ALL-UNNAMED'
 
 }
+
+apply plugin: 'maven-publish'
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            groupId = 'com.mite'
+            artifactId = 'semi-mite-spring-boot-starter'
+            version = '1.0.0'
+        }
+    }
+}

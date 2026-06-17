@@ -174,30 +174,15 @@ public class CppCompiler {
             result.add("#include <cstring>");
             result.add("");
 
-            boolean insideExternCBlock = false;
-
             for (int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i);
                 String trimmed = line.trim();
-
-                if (trimmed.equals("extern \"C\" {") || trimmed.equals("extern\"C\"{")) {
-                    insideExternCBlock = true;
-                    result.add(line);
-                    continue;
-                }
-                if (insideExternCBlock && trimmed.equals("}")) {
-                    insideExternCBlock = false;
-                    result.add(line);
-                    continue;
-                }
 
                 if (trimmed.equals("// @mite") && i + 1 < lines.size()) {
                     String next = lines.get(i + 1).trim();
                     result.add(line);
 
-                    boolean alreadyHasExtern = next.startsWith("extern");
-
-                    if (alreadyHasExtern || insideExternCBlock) {
+                    if (next.startsWith("extern")) {
                         result.add(lines.get(i + 1));
                     } else {
                         result.add("extern \"C\" " + lines.get(i + 1));
@@ -205,7 +190,6 @@ public class CppCompiler {
                     i++;
                     continue;
                 }
-
                 result.add(line);
             }
 
