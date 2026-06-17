@@ -11,8 +11,6 @@ public class CppParser {
             "int", "long", "double", "float", "bool", "std::string", "void", "const char*",
             "int8_t", "uint8_t", "int16_t", "uint16_t", "int32_t", "uint32_t", "int64_t", "uint64_t",
             "char", "unsigned char", "short", "unsigned short", "long long", "unsigned long long",
-
-            //special types
             "int*", "long long*", "double*", "float*", "int32_t*", "int64_t*"
     );
 
@@ -27,7 +25,7 @@ public class CppParser {
 
             for (int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i).trim();
-                if (!line.equals("// @mite")) continue;
+                if (!line.equals("// @mite") && !line.equals("//@mite")) continue;
 
                 StringBuilder sb = new StringBuilder();
                 int j = i + 1;
@@ -38,14 +36,14 @@ public class CppParser {
                         break;
                     }
                     if (nextLine.startsWith("//") || nextLine.startsWith("}")) {
-                        break; 
+                        break;
                     }
                     j++;
                 }
 
                 String fullSignatureStr = sb.toString().trim();
                 Optional<FunctionSignature> sig = parseSignature(fullSignatureStr);
-                System.out.println("SIG for '" + fullSignatureStr + "': " + sig);
+                System.out.println("[MITE PARSER] Registered signature: '" + fullSignatureStr + "' -> " + sig.isPresent());
                 sig.ifPresent(result::add);
 
                 i = j - 1;
@@ -95,8 +93,9 @@ public class CppParser {
         if (param.matches("const\\s+char\\s*\\*.*")) return "const char*";
         if (param.trim().equals("void")) return null;
 
-        boolean isPointer = param.contains("*") && !param.contains("char");
+        param = param.replaceAll("(\\*+)(\\w+)", "$1 $2");
 
+        boolean isPointer = param.contains("*") && !param.contains("char");
         param = param.replaceAll("\\bconst\\b", "").replaceAll("&", "").trim().replaceAll("\\s+", " ");
 
         if (SUPPORTED_TYPES.contains(param)) {
@@ -106,7 +105,6 @@ public class CppParser {
         int lastSpace = param.lastIndexOf(' ');
         if (lastSpace != -1) {
             String typeCandidate = param.substring(0, lastSpace).trim();
-
             typeCandidate = typeCandidate.replaceAll("\\s+\\*", "*");
 
             if (isPointer && !typeCandidate.endsWith("*")) {

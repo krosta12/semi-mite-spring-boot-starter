@@ -53,6 +53,7 @@ public class FunctionRegistry {
 
                 while (true) {
                     WatchKey key = watchService.take();
+                    Thread.sleep(150);
                     key.pollEvents();
                     System.out.println("[MITE] Change in cppScripts — rescan...");
                     scan();
@@ -105,34 +106,41 @@ public class FunctionRegistry {
 
         return switch (cppType) {
             case "int*", "int32_t*" -> arg instanceof java.util.Collection || arg instanceof int[];
-
             case "long long*", "int64_t*" -> arg instanceof java.util.Collection || arg instanceof long[];
-
             case "float*" -> arg instanceof java.util.Collection || arg instanceof float[];
-
             case "double*" -> arg instanceof java.util.Collection || arg instanceof double[];
 
             case "int8_t", "uint8_t", "char", "unsigned char" -> arg instanceof Byte;
-
             case "int16_t", "uint16_t", "short", "unsigned short" -> arg instanceof Short;
-
             case "int", "unsigned int", "int32_t", "uint32_t" -> arg instanceof Integer;
-
             case "long", "long long", "unsigned long long", "int64_t", "uint64_t" -> arg instanceof Long;
 
             case "float" -> arg instanceof Float;
             case "double" -> arg instanceof Double;
-
             case "bool" -> arg instanceof Boolean;
-
             case "std::string", "const char*" -> arg instanceof String;
 
             default -> {
-                if (cppType.endsWith("*") && arg != null) {
-                    String expectedClassName = cppType.substring(0, cppType.length() - 1).trim();
-                    String actualClassName = arg.getClass().getSimpleName();
+                if (cppType.endsWith("*")) {
+                    String baseCppType = cppType.replace("*", "").trim();
 
-                    yield actualClassName.equals(expectedClassName);
+                    Class<?> argClass = arg.getClass();
+                    String javaClassName = argClass.getSimpleName();
+
+                    if (javaClassName.equals(baseCppType)) {
+                        yield true;
+                    }
+
+                    if (argClass.isArray()) {
+                        String componentName = argClass.getComponentType().getSimpleName();
+                        if (componentName.equals(baseCppType)) {
+                            yield true;
+                        }
+                    }
+
+                    if (arg instanceof java.util.Collection) {
+                        yield true;
+                    }
                 }
                 yield false;
             }

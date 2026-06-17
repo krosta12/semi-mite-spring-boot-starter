@@ -41,5 +41,4 @@ out/
 
 ### Cahche ###
 .mite-cache
-cppScripts/compileCache/
-semi-mite-spring-boot-starter/cppScripts
+cppScripts

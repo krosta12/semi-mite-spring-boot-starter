@@ -175,6 +175,8 @@ public class DefaultCppEngine implements CppEngine {
     private Object[] marshalArgs(Object[] args, List<String> paramTypes, Arena arena, java.util.List<Runnable> copyBackTasks) {
         Object[] result = new Object[args.length];
 
+        java.util.Map<Object, MemorySegment> seen = new java.util.IdentityHashMap<>();
+
         for (int i = 0; i < args.length; i++) {
             String type = paramTypes.get(i);
 
@@ -205,7 +207,7 @@ public class DefaultCppEngine implements CppEngine {
                     result[i] = nativeSeg;
                     copyBackTasks.add(() -> MemorySegment.copy(nativeSeg, ValueLayout.JAVA_DOUBLE, 0, arr, 0, arr.length));
                 } else {
-                    result[i] = marshalCustomObject(args[i], arena, copyBackTasks);
+                    result[i] = marshalCustomObject(args[i], arena, copyBackTasks, seen);
                 }
             } else {
                 result[i] = args[i];
@@ -256,8 +258,13 @@ public class DefaultCppEngine implements CppEngine {
         };
     }
 
-    private MemorySegment marshalCustomObject(Object obj, Arena arena, java.util.List<Runnable> copyBackTasks) {
+    private MemorySegment marshalCustomObject(Object obj, Arena arena, java.util.List<Runnable> copyBackTasks, java.util.Map<Object, MemorySegment> seen) {
         if (obj == null) return MemorySegment.NULL;
+
+        if (seen.containsKey(obj)) {
+            return seen.get(obj);
+        }
+
         try {
             java.lang.reflect.Field[] fields = obj.getClass().getDeclaredFields();
             long currentOffset = 0;
@@ -276,10 +283,12 @@ public class DefaultCppEngine implements CppEngine {
                 else if (fType == long.class || fType == Long.class) size = 8;
                 else if (fType == double.class || fType == Double.class) size = 8;
                 else if (fType == float.class || fType == Float.class) size = 4;
-                else if (fType == String.class) size = 8;
+                else if (fType == short.class || fType == Short.class) size = 2;
                 else if (fType == boolean.class || fType == Boolean.class) size = 1;
                 else if (fType == byte.class || fType == Byte.class) size = 1;
-                else continue;
+                else {
+                    size = 8;
+                }
 
                 long alignment = size;
                 if (alignment > maxAlignment) maxAlignment = alignment;
@@ -292,21 +301,25 @@ public class DefaultCppEngine implements CppEngine {
             long totalSize = (currentOffset + maxAlignment - 1) & ~(maxAlignment - 1);
             if (totalSize == 0) totalSize = 1;
 
-            MemorySegment structSegment = arena.allocate(totalSize);
+            MemorySegment structSegment = arena.allocate(totalSize, maxAlignment);
+
+            seen.put(obj, structSegment);
 
             for (java.lang.reflect.Field field : fields) {
                 if (!fieldOffsets.containsKey(field)) continue;
                 long offset = fieldOffsets.get(field);
                 Object val = field.get(obj);
 
-                if (val == null) continue;
-
                 Class<?> fType = field.getType();
 
-                if (fType == String.class) {
-                    MemorySegment strSegment = arena.allocateFrom((String) val);
-                    structSegment.set(ValueLayout.ADDRESS, offset, strSegment);
-                } else if (fType == int.class || fType == Integer.class) {
+                if (val == null) {
+                    if (!fType.isPrimitive()) {
+                        structSegment.set(ValueLayout.ADDRESS, offset, MemorySegment.NULL);
+                    }
+                    continue;
+                }
+
+                if (fType == int.class || fType == Integer.class) {
                     structSegment.set(ValueLayout.JAVA_INT, offset, ((Number) val).intValue());
                 } else if (fType == long.class || fType == Long.class) {
                     structSegment.set(ValueLayout.JAVA_LONG, offset, ((Number) val).longValue());
@@ -314,10 +327,94 @@ public class DefaultCppEngine implements CppEngine {
                     structSegment.set(ValueLayout.JAVA_DOUBLE, offset, ((Number) val).doubleValue());
                 } else if (fType == float.class || fType == Float.class) {
                     structSegment.set(ValueLayout.JAVA_FLOAT, offset, ((Number) val).floatValue());
+                } else if (fType == short.class || fType == Short.class) {
+                    structSegment.set(ValueLayout.JAVA_SHORT, offset, ((Number) val).shortValue());
                 } else if (fType == boolean.class || fType == Boolean.class) {
                     structSegment.set(ValueLayout.JAVA_BOOLEAN, offset, (Boolean) val);
                 } else if (fType == byte.class || fType == Byte.class) {
                     structSegment.set(ValueLayout.JAVA_BYTE, offset, ((Number) val).byteValue());
+                }
+                else if (fType == String.class) {
+                    MemorySegment strSegment = arena.allocateFrom((String) val);
+                    structSegment.set(ValueLayout.ADDRESS, offset, strSegment);
+                }
+                else if (fType == float[].class) {
+                    float[] arr = (float[]) val;
+                    MemorySegment subSeg = arena.allocateFrom(ValueLayout.JAVA_FLOAT, arr);
+                    structSegment.set(ValueLayout.ADDRESS, offset, subSeg);
+                    copyBackTasks.add(() -> MemorySegment.copy(subSeg, ValueLayout.JAVA_FLOAT, 0, arr, 0, arr.length));
+                } else if (fType == int[].class) {
+                    int[] arr = (int[]) val;
+                    MemorySegment subSeg = arena.allocateFrom(ValueLayout.JAVA_INT, arr);
+                    structSegment.set(ValueLayout.ADDRESS, offset, subSeg);
+                    copyBackTasks.add(() -> MemorySegment.copy(subSeg, ValueLayout.JAVA_INT, 0, arr, 0, arr.length));
+                } else if (fType == long[].class) {
+                    long[] arr = (long[]) val;
+                    MemorySegment subSeg = arena.allocateFrom(ValueLayout.JAVA_LONG, arr);
+                    structSegment.set(ValueLayout.ADDRESS, offset, subSeg);
+                    copyBackTasks.add(() -> MemorySegment.copy(subSeg, ValueLayout.JAVA_LONG, 0, arr, 0, arr.length));
+                } else if (fType == double[].class) {
+                    double[] arr = (double[]) val;
+                    MemorySegment subSeg = arena.allocateFrom(ValueLayout.JAVA_DOUBLE, arr);
+                    structSegment.set(ValueLayout.ADDRESS, offset, subSeg);
+                    copyBackTasks.add(() -> MemorySegment.copy(subSeg, ValueLayout.JAVA_DOUBLE, 0, arr, 0, arr.length));
+                } else if (fType == byte[].class) {
+                    byte[] arr = (byte[]) val;
+                    MemorySegment subSeg = arena.allocateFrom(ValueLayout.JAVA_BYTE, arr);
+                    structSegment.set(ValueLayout.ADDRESS, offset, subSeg);
+                    copyBackTasks.add(() -> MemorySegment.copy(subSeg, ValueLayout.JAVA_BYTE, 0, arr, 0, arr.length));
+                } else if (fType == boolean[].class) {
+                    boolean[] arr = (boolean[]) val;
+                    MemorySegment subSeg = arena.allocate(ValueLayout.JAVA_BYTE, arr.length);
+                    for (int j = 0; j < arr.length; j++) {
+                        subSeg.setAtIndex(ValueLayout.JAVA_BYTE, j, (byte) (arr[j] ? 1 : 0));
+                    }
+                    structSegment.set(ValueLayout.ADDRESS, offset, subSeg);
+
+                    copyBackTasks.add(() -> {
+                        for (int j = 0; j < arr.length; j++) {
+                            arr[j] = subSeg.getAtIndex(ValueLayout.JAVA_BYTE, j) != 0;
+                        }
+                    });}
+                else if (fType.isArray()) {
+                    Object[] arr = (Object[]) val;
+                    MemorySegment subSeg = arena.allocate(ValueLayout.ADDRESS, arr.length);
+                    for (int j = 0; j < arr.length; j++) {
+                        MemorySegment elementSeg = marshalCustomObject(arr[j], arena, copyBackTasks, seen);
+                        subSeg.setAtIndex(ValueLayout.ADDRESS, j, elementSeg);
+                    }
+                    structSegment.set(ValueLayout.ADDRESS, offset, subSeg);
+                }
+                else if (val instanceof java.util.Collection) {
+                    java.util.Collection<?> col = (java.util.Collection<?>) val;
+                    if (!col.isEmpty()) {
+                        Object first = col.iterator().next();
+                        if (first instanceof Float) {
+                            float[] arr = new float[col.size()]; int idx = 0; for (Object x : col) arr[idx++] = (Float) x;
+                            MemorySegment subSeg = arena.allocateFrom(ValueLayout.JAVA_FLOAT, arr);
+                            structSegment.set(ValueLayout.ADDRESS, offset, subSeg);
+                            copyBackTasks.add(() -> { if (val instanceof java.util.List) { var l = (java.util.List<Float>) val; for (int k=0; k<arr.length; k++) l.set(k, subSeg.getAtIndex(ValueLayout.JAVA_FLOAT, k)); } });
+                        } else if (first instanceof Integer) {
+                            int[] arr = col.stream().mapToInt(x -> (Integer) x).toArray();
+                            MemorySegment subSeg = arena.allocateFrom(ValueLayout.JAVA_INT, arr);
+                            structSegment.set(ValueLayout.ADDRESS, offset, subSeg);
+                            copyBackTasks.add(() -> { if (val instanceof java.util.List) { var l = (java.util.List<Integer>) val; for (int k=0; k<arr.length; k++) l.set(k, subSeg.getAtIndex(ValueLayout.JAVA_INT, k)); } });
+                        } else {
+                            MemorySegment subSeg = arena.allocate(ValueLayout.ADDRESS, col.size());
+                            int idx = 0;
+                            for (Object item : col) {
+                                MemorySegment elementSeg = marshalCustomObject(item, arena, copyBackTasks, seen);
+                                subSeg.setAtIndex(ValueLayout.ADDRESS, idx++, elementSeg);
+                            }
+                            structSegment.set(ValueLayout.ADDRESS, offset, subSeg);
+                        }
+                    } else {
+                        structSegment.set(ValueLayout.ADDRESS, offset, MemorySegment.NULL);
+                    }
+                }
+                else {
+                    MemorySegment childSegment = marshalCustomObject(val, arena, copyBackTasks, seen);
+                    structSegment.set(ValueLayout.ADDRESS, offset, childSegment);
                 }
             }
 
@@ -336,6 +433,8 @@ public class DefaultCppEngine implements CppEngine {
                             field.set(obj, structSegment.get(ValueLayout.JAVA_DOUBLE, offset));
                         } else if (fType == float.class || fType == Float.class) {
                             field.set(obj, structSegment.get(ValueLayout.JAVA_FLOAT, offset));
+                        } else if (fType == short.class || fType == Short.class) {
+                            field.set(obj, structSegment.get(ValueLayout.JAVA_SHORT, offset));
                         } else if (fType == boolean.class || fType == Boolean.class) {
                             field.set(obj, structSegment.get(ValueLayout.JAVA_BOOLEAN, offset));
                         } else if (fType == byte.class || fType == Byte.class) {
