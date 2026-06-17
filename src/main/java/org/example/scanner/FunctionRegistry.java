@@ -99,8 +99,13 @@ public class FunctionRegistry {
 
     private boolean typeMatches(String cppType, Object arg) {
         return switch (cppType) {
-            case "int*", "int32_t*", "long long*", "int64_t*", "double*", "float*" ->
-                    arg instanceof java.util.Collection;
+            case "int*", "int32_t*" -> arg instanceof java.util.Collection || arg instanceof int[];
+
+            case "long long*", "int64_t*" -> arg instanceof java.util.Collection || arg instanceof long[];
+
+            case "float*" -> arg instanceof java.util.Collection || arg instanceof float[];
+
+            case "double*" -> arg instanceof java.util.Collection || arg instanceof double[];
 
             case "int8_t", "uint8_t", "char", "unsigned char" -> arg instanceof Byte;
 

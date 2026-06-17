@@ -168,10 +168,17 @@ public class DefaultCppEngine implements CppEngine {
             if ("std::string".equals(type) || "const char*".equals(type)) {
                 result[i] = args[i] == null ? MemorySegment.NULL : arena.allocateFrom((String) args[i]);
             } else if (type.endsWith("*")) {
-                if (args[i] instanceof java.util.Collection) {
-                    result[i] = allocateNativeArray((java.util.Collection<?>) args[i], type, arena);
-                } else {
-                    result[i] = marshalCustomObject(args[i], arena);
+                switch (args[i]) {
+                    case java.util.Collection collection -> result[i] = allocateNativeArray(collection, type, arena);
+                    case float[] arr ->
+                            result[i] = MemorySegment.ofArray(arr);
+                    case int[] arr ->
+                            result[i] = MemorySegment.ofArray(arr);
+                    case long[] arr ->
+                            result[i] = MemorySegment.ofArray(arr);
+                    case double[] arr ->
+                            result[i] = MemorySegment.ofArray(arr);
+                    case null, default -> result[i] = marshalCustomObject(args[i], arena);
                 }
             } else {
                 result[i] = args[i];
