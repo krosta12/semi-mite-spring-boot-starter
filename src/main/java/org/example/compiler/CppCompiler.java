@@ -11,13 +11,13 @@ public class CppCompiler {
 
     private final Path cacheDir;
     private final Map<String, CachedLib> cache = new ConcurrentHashMap<>();
-
     private final String customCompilerPath;
+    private final List<String> compilerFlags;
 
-
-    public CppCompiler(Path cacheDir, String customCompilerPath) {
+    public CppCompiler(Path cacheDir, String customCompilerPath, List<String> compilerFlags) {
         this.cacheDir = cacheDir;
         this.customCompilerPath = customCompilerPath;
+        this.compilerFlags = compilerFlags != null ? compilerFlags : List.of("-O2");
         try {
             Files.createDirectories(cacheDir);
         } catch (IOException e) {
@@ -68,11 +68,15 @@ public class CppCompiler {
         cmd.add(compiler);
         cmd.add("-shared");
         if (!win) cmd.add("-fPIC");
-        cmd.add("-O2");
+
+        cmd.addAll(compilerFlags);
+
         if (win) cmd.add("-Wl,--kill-at");
         cmd.add("-o");
         cmd.add(out.toAbsolutePath().toString());
         cmd.add(cppFile.toAbsolutePath().toString());
+
+        System.out.println(">>> MITE COMPILER CMD: " + cmd);
 
         try {
             ProcessBuilder pb = new ProcessBuilder(cmd);
@@ -164,7 +168,6 @@ public class CppCompiler {
 
         return found;
     }
-
 
     private Path preprocessAndCompile(Path cppFile) {
         try {

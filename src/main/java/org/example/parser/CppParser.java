@@ -25,14 +25,30 @@ public class CppParser {
             List<String> lines = Files.readAllLines(cppFile);
             List<FunctionSignature> result = new ArrayList<>();
 
-            for (int i = 0; i + 1 < lines.size(); i++) {
+            for (int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i).trim();
                 if (!line.equals("// @mite")) continue;
 
-                String next = lines.get(i + 1);
-                Optional<FunctionSignature> sig = parseSignature(next);
-                System.out.println("SIG for '" + next.trim() + "': " + sig);
+                StringBuilder sb = new StringBuilder();
+                int j = i + 1;
+                while (j < lines.size()) {
+                    String nextLine = lines.get(j).trim();
+                    sb.append(" ").append(nextLine);
+                    if (nextLine.contains("{") || nextLine.contains(";")) {
+                        break;
+                    }
+                    if (nextLine.startsWith("//") || nextLine.startsWith("}")) {
+                        break; 
+                    }
+                    j++;
+                }
+
+                String fullSignatureStr = sb.toString().trim();
+                Optional<FunctionSignature> sig = parseSignature(fullSignatureStr);
+                System.out.println("SIG for '" + fullSignatureStr + "': " + sig);
                 sig.ifPresent(result::add);
+
+                i = j - 1;
             }
 
             return result;

@@ -115,12 +115,23 @@ public class DefaultCppEngine implements CppEngine {
         MethodHandle handle = linker.downcallHandle(fn, descriptor);
 
         try (Arena arena = Arena.ofConfined()) {
-            Object[] nativeArgs = marshalArgs(args, sig.paramTypes(), arena);
+            java.util.List<Runnable> copyBackTasks = new java.util.ArrayList<>();
+            Object[] nativeArgs = marshalArgs(args, sig.paramTypes(), arena, copyBackTasks);
+
+            Object result = null;
             if ("void".equals(sig.returnType())) {
                 handle.invokeWithArguments(nativeArgs);
+            } else {
+                result = handle.invokeWithArguments(nativeArgs);
+            }
+
+            for (Runnable task : copyBackTasks) {
+                task.run();
+            }
+
+            if ("void".equals(sig.returnType())) {
                 return null;
             }
-            Object result = handle.invokeWithArguments(nativeArgs);
             return unmarshalResult(result, sig.returnType());
         } catch (Throwable e) {
             throw new MiteException("Error calling '" + sig.name() + "': " + e.getMessage(), e);
@@ -161,24 +172,40 @@ public class DefaultCppEngine implements CppEngine {
         };
     }
 
-    private Object[] marshalArgs(Object[] args, List<String> paramTypes, Arena arena) {
+    private Object[] marshalArgs(Object[] args, List<String> paramTypes, Arena arena, java.util.List<Runnable> copyBackTasks) {
         Object[] result = new Object[args.length];
+
         for (int i = 0; i < args.length; i++) {
             String type = paramTypes.get(i);
+
+            if (args[i] instanceof NativeResource nativeRes) {
+                result[i] = nativeRes.segment();
+                continue;
+            }
+
             if ("std::string".equals(type) || "const char*".equals(type)) {
                 result[i] = args[i] == null ? MemorySegment.NULL : arena.allocateFrom((String) args[i]);
             } else if (type.endsWith("*")) {
-                switch (args[i]) {
-                    case java.util.Collection collection -> result[i] = allocateNativeArray(collection, type, arena);
-                    case float[] arr ->
-                            result[i] = MemorySegment.ofArray(arr);
-                    case int[] arr ->
-                            result[i] = MemorySegment.ofArray(arr);
-                    case long[] arr ->
-                            result[i] = MemorySegment.ofArray(arr);
-                    case double[] arr ->
-                            result[i] = MemorySegment.ofArray(arr);
-                    case null, default -> result[i] = marshalCustomObject(args[i], arena);
+                if (args[i] instanceof java.util.Collection) {
+                    result[i] = allocateNativeArray((java.util.Collection<?>) args[i], type, arena);
+                } else if (args[i] instanceof float[] arr) {
+                    MemorySegment nativeSeg = arena.allocateFrom(ValueLayout.JAVA_FLOAT, arr);
+                    result[i] = nativeSeg;
+                    copyBackTasks.add(() -> MemorySegment.copy(nativeSeg, ValueLayout.JAVA_FLOAT, 0, arr, 0, arr.length));
+                } else if (args[i] instanceof int[] arr) {
+                    MemorySegment nativeSeg = arena.allocateFrom(ValueLayout.JAVA_INT, arr);
+                    result[i] = nativeSeg;
+                    copyBackTasks.add(() -> MemorySegment.copy(nativeSeg, ValueLayout.JAVA_INT, 0, arr, 0, arr.length));
+                } else if (args[i] instanceof long[] arr) {
+                    MemorySegment nativeSeg = arena.allocateFrom(ValueLayout.JAVA_LONG, arr);
+                    result[i] = nativeSeg;
+                    copyBackTasks.add(() -> MemorySegment.copy(nativeSeg, ValueLayout.JAVA_LONG, 0, arr, 0, arr.length));
+                } else if (args[i] instanceof double[] arr) {
+                    MemorySegment nativeSeg = arena.allocateFrom(ValueLayout.JAVA_DOUBLE, arr);
+                    result[i] = nativeSeg;
+                    copyBackTasks.add(() -> MemorySegment.copy(nativeSeg, ValueLayout.JAVA_DOUBLE, 0, arr, 0, arr.length));
+                } else {
+                    result[i] = marshalCustomObject(args[i], arena);
                 }
             } else {
                 result[i] = args[i];

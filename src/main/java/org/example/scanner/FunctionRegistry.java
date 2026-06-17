@@ -2,6 +2,7 @@ package org.example.scanner;
 
 import org.example.parser.CppParser;
 import org.example.parser.FunctionSignature;
+import org.example.engine.NativeResource;
 
 import java.io.IOException;
 import java.nio.file.*;
@@ -98,6 +99,10 @@ public class FunctionRegistry {
     }
 
     private boolean typeMatches(String cppType, Object arg) {
+        if (arg instanceof NativeResource) {
+            return cppType.endsWith("*");
+        }
+
         return switch (cppType) {
             case "int*", "int32_t*" -> arg instanceof java.util.Collection || arg instanceof int[];
 

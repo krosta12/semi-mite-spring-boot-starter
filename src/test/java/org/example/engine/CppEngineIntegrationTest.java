@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -28,7 +29,7 @@ class CppEngineIntegrationTest {
                 getClass().getClassLoader().getResource("cppScripts").toURI()
         );
 
-        CppCompiler compiler = new CppCompiler(CACHE_DIR, null);
+        CppCompiler compiler = new CppCompiler(CACHE_DIR, null, List.of());
         FunctionRegistry registry = new FunctionRegistry(scriptsDir);
         engine = new DefaultCppEngine(compiler, registry);
     }
