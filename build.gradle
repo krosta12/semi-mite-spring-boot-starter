@@ -1,0 +1,35 @@
+plugins {
+    id 'java-library'
+}
+
+group = 'com.mite'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Source: https://mvnrepository.com/artifact/org.springframework.boot/spring-boot-autoconfigure
+    compileOnly("org.springframework.boot:spring-boot-autoconfigure:4.1.0")
+    // Source: https://mvnrepository.com/artifact/org.springframework.boot/spring-boot-starter
+    compileOnly("org.springframework.boot:spring-boot-starter:4.1.0")
+
+
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test:4.1.0'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(26)
+    }
+}
+
+test {
+    useJUnitPlatform()
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+
+}

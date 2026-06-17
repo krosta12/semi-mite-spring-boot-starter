@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.example.parser.CppParserTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-06-17T08:44:52.297Z" hostname="DESKTOP-GI7CKM7" time="0.055">
+  <properties/>
+  <testcase name="ignoresFunctionsWithUnsupportedTypes(Path)" classname="org.example.parser.CppParserTest" time="0.006"/>
+  <testcase name="parsesConstCharStarFunction(Path)" classname="org.example.parser.CppParserTest" time="0.005"/>
+  <testcase name="parsesIntFunction(Path)" classname="org.example.parser.CppParserTest" time="0.005"/>
+  <testcase name="parsesPrimitivePointers(Path)" classname="org.example.parser.CppParserTest" time="0.006"/>
+  <testcase name="ignoresFunctionsWithoutAnnotation(Path)" classname="org.example.parser.CppParserTest" time="0.005"/>
+  <testcase name="parsesMultipleFunctions(Path)" classname="org.example.parser.CppParserTest" time="0.005"/>
+  <testcase name="parsesOverloadedFunctions(Path)" classname="org.example.parser.CppParserTest" time="0.005"/>
+  <testcase name="parsesBoolFunction(Path)" classname="org.example.parser.CppParserTest" time="0.004"/>
+  <testcase name="parsesDoubleFunction(Path)" classname="org.example.parser.CppParserTest" time="0.004"/>
+  <testcase name="parsesCustomObjectPointers(Path)" classname="org.example.parser.CppParserTest" time="0.005"/>
+  <system-out><![CDATA[SIG for 'void* process(void* data)': Optional.empty
+SIG for 'const char* greet(const char* name)': Optional[FunctionSignature[name=greet, returnType=const char*, paramTypes=[const char*]]]
+SIG for 'int add(int a, int b)': Optional[FunctionSignature[name=add, returnType=int, paramTypes=[int, int]]]
+SIG for 'int sumArray(int* arr, int size)': Optional[FunctionSignature[name=sumArray, returnType=int, paramTypes=[int*, int]]]
+SIG for 'double processDoubles(double * arr, int size)': Optional[FunctionSignature[name=processDoubles, returnType=double, paramTypes=[double*, int]]]
+SIG for 'int add(int a, int b)': Optional[FunctionSignature[name=add, returnType=int, paramTypes=[int, int]]]
+SIG for 'double multiply(double a, double b)': Optional[FunctionSignature[name=multiply, returnType=double, paramTypes=[double, double]]]
+SIG for 'int add(int a, int b)': Optional[FunctionSignature[name=add, returnType=int, paramTypes=[int, int]]]
+SIG for 'double add(double a, double b)': Optional[FunctionSignature[name=add, returnType=double, paramTypes=[double, double]]]
+SIG for 'bool isPositive(int n)': Optional[FunctionSignature[name=isPositive, returnType=bool, paramTypes=[int]]]
+SIG for 'double multiply(double a, double b)': Optional[FunctionSignature[name=multiply, returnType=double, paramTypes=[double, double]]]
+SIG for 'void printUser(User* user)': Optional[FunctionSignature[name=printUser, returnType=void, paramTypes=[User*]]]
+SIG for 'Order* createOrder(Order* order)': Optional[FunctionSignature[name=createOrder, returnType=Order*, paramTypes=[Order*]]]
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

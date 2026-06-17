@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.example.engine.AdvancedTypesIntegrationTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-06-17T08:44:51.611Z" hostname="DESKTOP-GI7CKM7" time="0.496">
+  <properties/>
+  <testcase name="testListToVectorMarshalling()" classname="org.example.engine.AdvancedTypesIntegrationTest" time="0.428"/>
+  <testcase name="testCustomObjectToStructMarshalling()" classname="org.example.engine.AdvancedTypesIntegrationTest" time="0.013"/>
+  <testcase name="testSetToVectorMarshalling()" classname="org.example.engine.AdvancedTypesIntegrationTest" time="0.002"/>
+  <testcase name="testNullObjectMarshalling()" classname="org.example.engine.AdvancedTypesIntegrationTest" time="0.002"/>
+  <system-out><![CDATA[SIG for 'int sumList(int* arr, int size) {': Optional[FunctionSignature[name=sumList, returnType=int, paramTypes=[int*, int]]]
+SIG for 'double getProductPrice(TestProduct* product) {': Optional[FunctionSignature[name=getProductPrice, returnType=double, paramTypes=[TestProduct*]]]
+[MITE] Change in cppScripts — rescan...
+[MITE] Change in cppScripts — rescan...
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
