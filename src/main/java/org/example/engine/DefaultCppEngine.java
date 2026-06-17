@@ -205,7 +205,7 @@ public class DefaultCppEngine implements CppEngine {
                     result[i] = nativeSeg;
                     copyBackTasks.add(() -> MemorySegment.copy(nativeSeg, ValueLayout.JAVA_DOUBLE, 0, arr, 0, arr.length));
                 } else {
-                    result[i] = marshalCustomObject(args[i], arena);
+                    result[i] = marshalCustomObject(args[i], arena, copyBackTasks);
                 }
             } else {
                 result[i] = args[i];
@@ -256,7 +256,7 @@ public class DefaultCppEngine implements CppEngine {
         };
     }
 
-    private MemorySegment marshalCustomObject(Object obj, Arena arena) {
+    private MemorySegment marshalCustomObject(Object obj, Arena arena, java.util.List<Runnable> copyBackTasks) {
         if (obj == null) return MemorySegment.NULL;
         try {
             java.lang.reflect.Field[] fields = obj.getClass().getDeclaredFields();
@@ -320,6 +320,32 @@ public class DefaultCppEngine implements CppEngine {
                     structSegment.set(ValueLayout.JAVA_BYTE, offset, ((Number) val).byteValue());
                 }
             }
+
+            copyBackTasks.add(() -> {
+                try {
+                    for (java.lang.reflect.Field field : fields) {
+                        if (!fieldOffsets.containsKey(field)) continue;
+                        long offset = fieldOffsets.get(field);
+                        Class<?> fType = field.getType();
+
+                        if (fType == int.class || fType == Integer.class) {
+                            field.set(obj, structSegment.get(ValueLayout.JAVA_INT, offset));
+                        } else if (fType == long.class || fType == Long.class) {
+                            field.set(obj, structSegment.get(ValueLayout.JAVA_LONG, offset));
+                        } else if (fType == double.class || fType == Double.class) {
+                            field.set(obj, structSegment.get(ValueLayout.JAVA_DOUBLE, offset));
+                        } else if (fType == float.class || fType == Float.class) {
+                            field.set(obj, structSegment.get(ValueLayout.JAVA_FLOAT, offset));
+                        } else if (fType == boolean.class || fType == Boolean.class) {
+                            field.set(obj, structSegment.get(ValueLayout.JAVA_BOOLEAN, offset));
+                        } else if (fType == byte.class || fType == Byte.class) {
+                            field.set(obj, structSegment.get(ValueLayout.JAVA_BYTE, offset));
+                        }
+                    }
+                } catch (Exception e) {
+                    throw new MiteException("Mite auto-unmarshal failed for object: " + obj.getClass().getName(), e);
+                }
+            });
 
             return structSegment;
         } catch (Exception e) {
