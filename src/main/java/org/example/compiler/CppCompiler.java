@@ -22,7 +22,21 @@ public class CppCompiler {
     public CppCompiler(Path cacheDir, String customCompilerPath, List<String> compilerFlags) {
         this.cacheDir = cacheDir;
         this.customCompilerPath = customCompilerPath;
-        this.compilerFlags = compilerFlags != null ? compilerFlags : List.of("-O2");
+
+        List<String> processedFlags = new ArrayList<>();
+        if (compilerFlags != null) {
+            for (String flag : compilerFlags) {
+                if (flag != null && !flag.isBlank()) {
+                    String[] split = flag.trim().split("\\s+");
+                    for (String part : split) {
+                        processedFlags.add(part);
+                    }
+                }
+            }
+        }
+
+        this.compilerFlags = !processedFlags.isEmpty() ? processedFlags : List.of("-O2");
+
         try {
             Files.createDirectories(cacheDir);
         } catch (IOException e) {

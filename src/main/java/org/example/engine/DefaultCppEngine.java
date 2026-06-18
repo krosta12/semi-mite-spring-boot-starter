@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class DefaultCppEngine implements CppEngine {
 
@@ -21,6 +22,11 @@ public class DefaultCppEngine implements CppEngine {
 
     private final Path cacheFile = Path.of("cppScripts/compileCache", ".mite_cache.properties");
     private final Properties cache = new Properties();
+
+    private final java.util.Map<Path, SymbolLookup> libraryCache = new ConcurrentHashMap<>();
+    private final java.util.Map<String, MethodHandle> methodHandleCache = new ConcurrentHashMap<>();
+
+    private final java.util.Map<String, Class<?>> structRegistry = new ConcurrentHashMap<>();
 
     public DefaultCppEngine(CppCompiler compiler, FunctionRegistry registry) {
         this.compiler = compiler;
@@ -104,19 +110,30 @@ public class DefaultCppEngine implements CppEngine {
             args = new Object[]{null};
         }
 
-        SymbolLookup lookup = SymbolLookup.libraryLookup(lib, Arena.global());
-
-        MemorySegment fn = lookup.find(sig.name())
-                .orElseThrow(() -> new MiteException(
-                        "Symbol '" + sig.name() + "' not found. Add extern \"C\" before the function."
-                ));
-
-        FunctionDescriptor descriptor = buildDescriptor(sig);
-        MethodHandle handle = linker.downcallHandle(fn, descriptor);
+        String cacheKey = lib.toAbsolutePath().toString() + "::" + sig.name() + "::" + sig.paramTypes().toString() + "->" + sig.returnType();
+        MethodHandle handle = methodHandleCache.computeIfAbsent(cacheKey, k -> {
+            SymbolLookup lookup = libraryCache.computeIfAbsent(lib, p -> SymbolLookup.libraryLookup(p, Arena.global()));
+            MemorySegment fn = lookup.find(sig.name())
+                    .orElseThrow(() -> new MiteException(
+                            "Symbol '" + sig.name() + "' not found. Add extern \"C\" before the function."
+                    ));
+            FunctionDescriptor descriptor = buildDescriptor(sig);
+            return linker.downcallHandle(fn, descriptor);
+        });
 
         try (Arena arena = Arena.ofConfined()) {
             java.util.List<Runnable> copyBackTasks = new java.util.ArrayList<>();
-            Object[] nativeArgs = marshalArgs(args, sig.paramTypes(), arena, copyBackTasks);
+
+            java.util.Map<Object, MemorySegment> seen = new java.util.IdentityHashMap<>();
+            java.util.Map<Long, Object> nativeToJava = new java.util.HashMap<>();
+
+            for (Object arg : args) {
+                if (arg != null && arg.getClass().isAnnotationPresent(org.example.annotation.MiteStruct.class)) {
+                    structRegistry.put(arg.getClass().getSimpleName(), arg.getClass());
+                }
+            }
+
+            Object[] nativeArgs = marshalArgs(args, sig.paramTypes(), arena, copyBackTasks, seen, nativeToJava);
 
             Object result = null;
             if ("void".equals(sig.returnType())) {
@@ -132,7 +149,8 @@ public class DefaultCppEngine implements CppEngine {
             if ("void".equals(sig.returnType())) {
                 return null;
             }
-            return unmarshalResult(result, sig.returnType());
+
+            return unmarshalResult(result, sig.returnType(), nativeToJava);
         } catch (Throwable e) {
             throw new MiteException("Error calling '" + sig.name() + "': " + e.getMessage(), e);
         }
@@ -164,7 +182,7 @@ public class DefaultCppEngine implements CppEngine {
             case "double" -> ValueLayout.JAVA_DOUBLE;
             case "bool" -> ValueLayout.JAVA_BOOLEAN;
 
-            case "std::string", "const char*", "int*", "int32_t*", "long long*", "int64_t*", "double*", "float*" ->
+            case "std::string", "const char*", "int*", "int32_t*", "long long*", "int64_t*", "double*", "float*", "bool*" ->
                     ValueLayout.ADDRESS;
             case "void" -> null;
 
@@ -172,10 +190,11 @@ public class DefaultCppEngine implements CppEngine {
         };
     }
 
-    private Object[] marshalArgs(Object[] args, List<String> paramTypes, Arena arena, java.util.List<Runnable> copyBackTasks) {
+    private Object[] marshalArgs(Object[] args, List<String> paramTypes, Arena arena,
+                                 java.util.List<Runnable> copyBackTasks,
+                                 java.util.Map<Object, MemorySegment> seen,
+                                 java.util.Map<Long, Object> nativeToJava) {
         Object[] result = new Object[args.length];
-
-        java.util.Map<Object, MemorySegment> seen = new java.util.IdentityHashMap<>();
 
         for (int i = 0; i < args.length; i++) {
             String type = paramTypes.get(i);
@@ -187,7 +206,7 @@ public class DefaultCppEngine implements CppEngine {
 
             if ("std::string".equals(type) || "const char*".equals(type)) {
                 result[i] = args[i] == null ? MemorySegment.NULL : arena.allocateFrom((String) args[i]);
-            } else if (type.endsWith("*")) {
+            } else if (type != null && type.endsWith("*")) {
                 if (args[i] instanceof java.util.Collection) {
                     result[i] = allocateNativeArray((java.util.Collection<?>) args[i], type, arena);
                 } else if (args[i] instanceof float[] arr) {
@@ -206,8 +225,31 @@ public class DefaultCppEngine implements CppEngine {
                     MemorySegment nativeSeg = arena.allocateFrom(ValueLayout.JAVA_DOUBLE, arr);
                     result[i] = nativeSeg;
                     copyBackTasks.add(() -> MemorySegment.copy(nativeSeg, ValueLayout.JAVA_DOUBLE, 0, arr, 0, arr.length));
+                } else if (args[i] instanceof boolean[] arr) {
+                    MemorySegment nativeSeg = arena.allocate(ValueLayout.JAVA_BYTE, arr.length);
+                    for (int j = 0; j < arr.length; j++) {
+                        nativeSeg.setAtIndex(ValueLayout.JAVA_BYTE, j, (byte) (arr[j] ? 1 : 0));
+                    }
+                    result[i] = nativeSeg;
+                    copyBackTasks.add(() -> {
+                        for (int j = 0; j < arr.length; j++) {
+                            arr[j] = nativeSeg.getAtIndex(ValueLayout.JAVA_BYTE, j) != 0;
+                        }
+                    });
+                } else if (args[i] instanceof byte[] arr) {
+                    MemorySegment nativeSeg = arena.allocateFrom(ValueLayout.JAVA_BYTE, arr);
+                    result[i] = nativeSeg;
+                    copyBackTasks.add(() -> MemorySegment.copy(nativeSeg, ValueLayout.JAVA_BYTE, 0, arr, 0, arr.length));
+                } else if (args[i] instanceof short[] arr) {
+                    MemorySegment nativeSeg = arena.allocateFrom(ValueLayout.JAVA_SHORT, arr);
+                    result[i] = nativeSeg;
+                    copyBackTasks.add(() -> MemorySegment.copy(nativeSeg, ValueLayout.JAVA_SHORT, 0, arr, 0, arr.length));
+                } else if (args[i] instanceof char[] arr) {
+                    MemorySegment nativeSeg = arena.allocateFrom(ValueLayout.JAVA_CHAR, arr);
+                    result[i] = nativeSeg;
+                    copyBackTasks.add(() -> MemorySegment.copy(nativeSeg, ValueLayout.JAVA_CHAR, 0, arr, 0, arr.length));
                 } else {
-                    result[i] = marshalCustomObject(args[i], arena, copyBackTasks, seen);
+                    result[i] = marshalCustomObject(args[i], arena, copyBackTasks, seen, nativeToJava);
                 }
             } else {
                 result[i] = args[i];
@@ -216,19 +258,85 @@ public class DefaultCppEngine implements CppEngine {
         return result;
     }
 
-    private Object unmarshalResult(Object result, String returnType) {
+    private Object unmarshalResult(Object result, String returnType, java.util.Map<Long, Object> nativeToJava) {
         if (result instanceof MemorySegment seg) {
             if (seg.address() == 0) {
                 return null;
             }
             if ("const char*".equals(returnType) || "std::string".equals(returnType)) {
-                MemorySegment safe = seg.reinterpret(4096);
+                MemorySegment safe = seg.reinterpret(Long.MAX_VALUE);
                 long len = 0;
-                while (len < 4096 && safe.get(ValueLayout.JAVA_BYTE, len) != 0) len++;
+                while (safe.get(ValueLayout.JAVA_BYTE, len) != 0) len++;
                 return new String(safe.asSlice(0, len).toArray(ValueLayout.JAVA_BYTE));
+            }
+
+            if (returnType != null && returnType.endsWith("*")) {
+                String cleanType = returnType.replace("*", "").trim();
+                Class<?> targetClass = structRegistry.get(cleanType);
+                if (targetClass != null) {
+                    return unmarshalCustomObject(seg, targetClass, nativeToJava);
+                }
             }
         }
         return result;
+    }
+
+    private Object unmarshalCustomObject(MemorySegment seg, Class<?> clazz, java.util.Map<Long, Object> nativeToJava) {
+        if (seg.address() == 0) return null;
+        if (nativeToJava.containsKey(seg.address())) return nativeToJava.get(seg.address());
+
+        try {
+            Object obj = clazz.getDeclaredConstructor().newInstance();
+            nativeToJava.put(seg.address(), obj);
+
+            java.lang.reflect.Field[] fields = clazz.getDeclaredFields();
+            long currentOffset = 0;
+            long maxAlignment = 1;
+            java.util.Map<java.lang.reflect.Field, Long> fieldOffsets = new java.util.HashMap<>();
+
+            for (java.lang.reflect.Field field : fields) {
+                if (field.isSynthetic()) continue;
+                field.setAccessible(true);
+                Class<?> fType = field.getType();
+                long size = (fType == int.class || fType == float.class) ? 4 :
+                        (fType == long.class || fType == double.class) ? 8 :
+                                (fType == short.class) ? 2 :
+                                        (fType == boolean.class || fType == byte.class) ? 1 : 8;
+
+                if (size > maxAlignment) maxAlignment = size;
+                currentOffset = (currentOffset + size - 1) & ~(size - 1);
+                fieldOffsets.put(field, currentOffset);
+                currentOffset += size;
+            }
+
+            for (java.lang.reflect.Field field : fields) {
+                if (!fieldOffsets.containsKey(field)) continue;
+                long offset = fieldOffsets.get(field);
+                Class<?> fType = field.getType();
+
+                if (fType == int.class || fType == Integer.class) field.set(obj, seg.get(ValueLayout.JAVA_INT, offset));
+                else if (fType == long.class || fType == Long.class) field.set(obj, seg.get(ValueLayout.JAVA_LONG, offset));
+                else if (fType == double.class || fType == Double.class) field.set(obj, seg.get(ValueLayout.JAVA_DOUBLE, offset));
+                else if (fType == float.class || fType == Float.class) field.set(obj, seg.get(ValueLayout.JAVA_FLOAT, offset));
+                else if (fType == short.class || fType == Short.class) field.set(obj, seg.get(ValueLayout.JAVA_SHORT, offset));
+                else if (fType == boolean.class || fType == Boolean.class) field.set(obj, seg.get(ValueLayout.JAVA_BOOLEAN, offset));
+                else if (fType == byte.class || fType == Byte.class) field.set(obj, seg.get(ValueLayout.JAVA_BYTE, offset));
+                else if (fType == String.class) {
+                    MemorySegment strSeg = seg.get(ValueLayout.ADDRESS, offset);
+                    if (strSeg.address() != 0) {
+                        MemorySegment safe = strSeg.reinterpret(Long.MAX_VALUE);
+                        long len = 0; while (safe.get(ValueLayout.JAVA_BYTE, len) != 0) len++;
+                        field.set(obj, new String(safe.asSlice(0, len).toArray(ValueLayout.JAVA_BYTE)));
+                    }
+                } else if (!fType.isPrimitive() && !fType.isArray() && !java.util.Collection.class.isAssignableFrom(fType)) {
+                    MemorySegment childSeg = seg.get(ValueLayout.ADDRESS, offset);
+                    field.set(obj, unmarshalCustomObject(childSeg, fType, nativeToJava));
+                }
+            }
+            return obj;
+        } catch (Exception e) {
+            throw new MiteException("Dynamic unmarshalling failed for " + clazz.getName(), e);
+        }
     }
 
     private MemorySegment allocateNativeArray(java.util.Collection<?> collection, String cppType, Arena arena) {
@@ -242,31 +350,39 @@ public class DefaultCppEngine implements CppEngine {
                 long[] arr = collection.stream().mapToLong(x -> ((Number) x).longValue()).toArray();
                 yield arena.allocateFrom(ValueLayout.JAVA_LONG, arr);
             }
-            case "double*" -> {
-                double[] arr = collection.stream().mapToDouble(x -> ((Number) x).doubleValue()).toArray();
-                yield arena.allocateFrom(ValueLayout.JAVA_DOUBLE, arr);
-            }
-            case "float*" -> {
-                float[] arr = new float[size];
-                int i = 0;
-                for (Object x : collection) {
-                    arr[i++] = ((Number) x).floatValue();
+            case "double*", "float*" -> {
+                if (cppType.contains("double")) {
+                    double[] arr = collection.stream().mapToDouble(x -> ((Number) x).doubleValue()).toArray();
+                    yield arena.allocateFrom(ValueLayout.JAVA_DOUBLE, arr);
+                } else {
+                    float[] arr = new float[size];
+                    int i = 0;
+                    for (Object x : collection) {
+                        arr[i++] = ((Number) x).floatValue();
+                    }
+                    yield arena.allocateFrom(ValueLayout.JAVA_FLOAT, arr);
                 }
-                yield arena.allocateFrom(ValueLayout.JAVA_FLOAT, arr);
             }
             default -> throw new MiteException("Unsupported array type for marshalling: " + cppType);
         };
     }
 
-    private MemorySegment marshalCustomObject(Object obj, Arena arena, java.util.List<Runnable> copyBackTasks, java.util.Map<Object, MemorySegment> seen) {
+    @SuppressWarnings("unchecked")
+    private MemorySegment marshalCustomObject(Object obj, Arena arena,
+                                              java.util.List<Runnable> copyBackTasks,
+                                              java.util.Map<Object, MemorySegment> seen,
+                                              java.util.Map<Long, Object> nativeToJava) {
         if (obj == null) return MemorySegment.NULL;
+        if (seen.containsKey(obj)) return seen.get(obj);
 
-        if (seen.containsKey(obj)) {
-            return seen.get(obj);
+        if (!obj.getClass().isAnnotationPresent(org.example.annotation.MiteStruct.class)) {
+            throw new MiteException("Security Violation: Class " + obj.getClass().getName() +
+                    " must be annotated with @MiteStruct to be passed automatically.");
         }
 
         try {
             java.lang.reflect.Field[] fields = obj.getClass().getDeclaredFields();
+
             long currentOffset = 0;
             long maxAlignment = 1;
 
@@ -302,8 +418,10 @@ public class DefaultCppEngine implements CppEngine {
             if (totalSize == 0) totalSize = 1;
 
             MemorySegment structSegment = arena.allocate(totalSize, maxAlignment);
-
             seen.put(obj, structSegment);
+            nativeToJava.put(structSegment.address(), obj);
+
+            structRegistry.put(obj.getClass().getSimpleName(), obj.getClass());
 
             for (java.lang.reflect.Field field : fields) {
                 if (!fieldOffsets.containsKey(field)) continue;
@@ -375,12 +493,13 @@ public class DefaultCppEngine implements CppEngine {
                         for (int j = 0; j < arr.length; j++) {
                             arr[j] = subSeg.getAtIndex(ValueLayout.JAVA_BYTE, j) != 0;
                         }
-                    });}
+                    });
+                }
                 else if (fType.isArray()) {
                     Object[] arr = (Object[]) val;
                     MemorySegment subSeg = arena.allocate(ValueLayout.ADDRESS, arr.length);
                     for (int j = 0; j < arr.length; j++) {
-                        MemorySegment elementSeg = marshalCustomObject(arr[j], arena, copyBackTasks, seen);
+                        MemorySegment elementSeg = marshalCustomObject(arr[j], arena, copyBackTasks, seen, nativeToJava);
                         subSeg.setAtIndex(ValueLayout.ADDRESS, j, elementSeg);
                     }
                     structSegment.set(ValueLayout.ADDRESS, offset, subSeg);
@@ -403,7 +522,7 @@ public class DefaultCppEngine implements CppEngine {
                             MemorySegment subSeg = arena.allocate(ValueLayout.ADDRESS, col.size());
                             int idx = 0;
                             for (Object item : col) {
-                                MemorySegment elementSeg = marshalCustomObject(item, arena, copyBackTasks, seen);
+                                MemorySegment elementSeg = marshalCustomObject(item, arena, copyBackTasks, seen, nativeToJava);
                                 subSeg.setAtIndex(ValueLayout.ADDRESS, idx++, elementSeg);
                             }
                             structSegment.set(ValueLayout.ADDRESS, offset, subSeg);
@@ -413,7 +532,7 @@ public class DefaultCppEngine implements CppEngine {
                     }
                 }
                 else {
-                    MemorySegment childSegment = marshalCustomObject(val, arena, copyBackTasks, seen);
+                    MemorySegment childSegment = marshalCustomObject(val, arena, copyBackTasks, seen, nativeToJava);
                     structSegment.set(ValueLayout.ADDRESS, offset, childSegment);
                 }
             }
@@ -439,6 +558,18 @@ public class DefaultCppEngine implements CppEngine {
                             field.set(obj, structSegment.get(ValueLayout.JAVA_BOOLEAN, offset));
                         } else if (fType == byte.class || fType == Byte.class) {
                             field.set(obj, structSegment.get(ValueLayout.JAVA_BYTE, offset));
+                        }
+                        else if (!fType.isPrimitive() && fType != String.class && !fType.isArray() && !java.util.Collection.class.isAssignableFrom(fType)) {
+                            MemorySegment actualAddressSeg = structSegment.get(ValueLayout.ADDRESS, offset);
+                            if (actualAddressSeg.address() == 0) {
+                                field.set(obj, null);
+                            } else {
+                                Object linkedJavaObj = nativeToJava.get(actualAddressSeg.address());
+                                if (linkedJavaObj == null) {
+                                    linkedJavaObj = unmarshalCustomObject(actualAddressSeg, fType, nativeToJava);
+                                }
+                                field.set(obj, linkedJavaObj);
+                            }
                         }
                     }
                 } catch (Exception e) {

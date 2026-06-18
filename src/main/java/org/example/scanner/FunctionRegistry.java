@@ -17,9 +17,7 @@ public class FunctionRegistry {
     private final CppParser parser = new CppParser();
     private final Map<String, List<ResolvedFunction>> index = new ConcurrentHashMap<>();
 
-
     private static final Logger log = LoggerFactory.getLogger(FunctionRegistry.class);
-
 
     public FunctionRegistry(Path scriptsDir) {
         this.scriptsDir = scriptsDir;
@@ -111,6 +109,7 @@ public class FunctionRegistry {
         }
 
         return switch (cppType) {
+            case "bool*" -> arg instanceof boolean[];
             case "int*", "int32_t*" -> arg instanceof java.util.Collection || arg instanceof int[];
             case "long long*", "int64_t*" -> arg instanceof java.util.Collection || arg instanceof long[];
             case "float*" -> arg instanceof java.util.Collection || arg instanceof float[];
@@ -130,10 +129,14 @@ public class FunctionRegistry {
                 if (cppType.endsWith("*")) {
                     String baseCppType = cppType.replace("*", "").trim();
 
+                    if (baseCppType.startsWith("struct ")) baseCppType = baseCppType.substring(7).trim();
+                    if (baseCppType.startsWith("class ")) baseCppType = baseCppType.substring(6).trim();
+
                     Class<?> argClass = arg.getClass();
                     String javaClassName = argClass.getSimpleName();
+                    String javaFullClassName = argClass.getName();
 
-                    if (javaClassName.equals(baseCppType)) {
+                    if (javaClassName.equals(baseCppType) || javaFullClassName.equals(baseCppType)) {
                         yield true;
                     }
 

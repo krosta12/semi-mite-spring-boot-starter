@@ -1,5 +1,6 @@
 package org.example.engine;
 
+import org.example.annotation.MiteStruct;
 import org.example.compiler.CppCompiler;
 import org.example.scanner.FunctionRegistry;
 import org.junit.jupiter.api.BeforeAll;
@@ -20,10 +21,14 @@ class AdvancedTypesIntegrationTest {
 
     private static final Path CACHE_DIR = Path.of(System.getProperty("java.io.tmpdir"), "mite-adv-test-cache");
 
+    @MiteStruct
     public static class TestProduct {
         private long id;
         private double price;
         private String name;
+
+        public TestProduct() {
+        }
 
         public TestProduct(long id, double price, String name) {
             this.id = id;
