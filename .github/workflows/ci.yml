@@ -8,7 +8,12 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
@@ -20,21 +25,42 @@ jobs:
           java-version: "24"
           distribution: "temurin"
 
-      - name: Setup MSYS2 (MinGW toolchain)
+      - name: Install g++ (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++
+
+      - name: Setup MSYS2 (Windows)
+        if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
           install: mingw-w64-x86_64-toolchain
 
-      - name: Verify g++
+      - name: Verify compiler (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          which g++
+          g++ --version
+
+      - name: Verify compiler (Windows)
+        if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
           which g++
           g++ --version
 
-      - name: Run Tests
+      - name: Run Tests (Linux)
+        if: runner.os == 'Linux'
+        env:
+          MITE_COMPILER_PATH: g++
+        run: bash ./gradlew test --stacktrace --no-daemon
+
+      - name: Run Tests (Windows)
+        if: runner.os == 'Windows'
         shell: msys2 {0}
         env:
           MITE_COMPILER_PATH: g++
-        run: ./gradlew test --no-daemon
+        run: ./gradlew test --stacktrace --no-daemon
