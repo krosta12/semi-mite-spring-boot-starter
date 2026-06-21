@@ -5,8 +5,62 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.lang.reflect.Field;
 
+/**
+ * Low-level utility for reading and writing flat Java objects to and from
+ * off-heap native memory segments.
+ *
+ * <p>This class handles only <b>flat structs</b> — objects whose fields are
+ * exclusively scalar primitives or {@code String}. Nested objects, collections,
+ * arrays of objects, and cyclic references are <b>not supported</b> here.
+ * For those cases, use the recursive marshalling logic in
+ * {@link org.example.engine.DefaultCppEngine}.
+ *
+ * <p>{@code StructMarshaller} is used by {@link MiteStruct} to back the
+ * explicit {@link MiteStruct#write}/{@link MiteStruct#read} API. It is
+ * not invoked by the automatic marshalling path in {@code DefaultCppEngine}.
+ *
+ * <p>Field layout follows natural C alignment rules: each field is aligned
+ * to its own size (e.g., {@code float} to a 4-byte boundary, {@code long}
+ * to an 8-byte boundary). Fields are processed in their declaration order.
+ * Unsupported field types are silently skipped.
+ *
+ * <p>Supported field types:
+ * <ul>
+ *   <li>{@code int} / {@code Integer} — 4 bytes</li>
+ *   <li>{@code long} / {@code Long} — 8 bytes</li>
+ *   <li>{@code double} / {@code Double} — 8 bytes</li>
+ *   <li>{@code float} / {@code Float} — 4 bytes</li>
+ *   <li>{@code boolean} / {@code Boolean} — 1 byte</li>
+ *   <li>{@code byte} / {@code Byte} — 1 byte</li>
+ *   <li>{@code String} — 8-byte pointer to a null-terminated native string</li>
+ * </ul>
+ *
+ * @see MiteStruct
+ * @see StructLayoutCalculator
+ */
 public class StructMarshaller {
 
+    /**
+     * Writes the fields of {@code javaObject} into the given native memory segment.
+     *
+     * <p>Fields are laid out in declaration order using natural alignment.
+     * Each field value is read via reflection and written to the corresponding
+     * byte offset in {@code segment}. {@code String} values are allocated as
+     * null-terminated native strings inside {@code arena}, and the resulting
+     * pointer is stored in the segment. A {@code null} {@code String} field
+     * writes a null pointer ({@link MemorySegment#NULL}).
+     *
+     * <p>Unsupported field types are silently skipped. The caller must ensure
+     * {@code segment} is large enough to hold the struct — use
+     * {@link StructLayoutCalculator#calculateSize} to determine the required size.
+     *
+     * @param <T>        the type of the Java object being written
+     * @param javaObject the source Java object whose fields are serialised to native memory
+     * @param segment    the target off-heap memory segment to write into
+     * @param arena      the arena used to allocate native string memory for {@code String} fields;
+     *                   must outlive any native reads of those string pointers
+     * @throws RuntimeException if a field cannot be accessed via reflection
+     */
     public static <T> void writeToSegment(T javaObject, MemorySegment segment, Arena arena) {
         try {
             Field[] fields = javaObject.getClass().getDeclaredFields();
@@ -66,6 +120,24 @@ public class StructMarshaller {
         }
     }
 
+    /**
+     * Reads fields from the given native memory segment into a new instance of {@code type}.
+     *
+     * <p>The class is instantiated via its no-arg constructor. Fields are then populated
+     * in declaration order using the same natural-alignment layout algorithm as
+     * {@link #writeToSegment}, ensuring byte offsets match exactly.
+     *
+     * <p>{@code String} fields are read by following the stored native pointer and scanning
+     * for a null terminator, with a safety cap of 4096 bytes. A null pointer results in
+     * {@code null} being set on the field. Unsupported field types are silently skipped.
+     *
+     * @param <T>     the type to instantiate and populate
+     * @param type    the class whose fields should be read from native memory;
+     *                must have a public no-arg constructor
+     * @param segment the source off-heap memory segment to read from
+     * @return a new instance of {@code type} with fields populated from {@code segment}
+     * @throws RuntimeException if the object cannot be instantiated or a field cannot be set
+     */
     public static <T> T readFromSegment(Class<T> type, MemorySegment segment) {
         try {
             T obj = type.getConstructor().newInstance();

@@ -119,6 +119,6 @@ public class MiteAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public CppEngine cppEngine(CppCompiler compiler, FunctionRegistry registry) {
-        return new DefaultCppEngine(compiler, registry);
+        return new DefaultCppEngine(compiler, registry, props.getScriptsDir());
     }
 }

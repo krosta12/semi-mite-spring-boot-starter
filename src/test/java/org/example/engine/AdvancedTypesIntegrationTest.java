@@ -69,7 +69,7 @@ class AdvancedTypesIntegrationTest {
 
         CppCompiler compiler = new CppCompiler(CACHE_DIR, null, List.of());
         FunctionRegistry registry = new FunctionRegistry(scriptsDir);
-        engine = new DefaultCppEngine(compiler, registry);
+        engine = new DefaultCppEngine(compiler, registry,scriptsDir);
     }
 
     @Test

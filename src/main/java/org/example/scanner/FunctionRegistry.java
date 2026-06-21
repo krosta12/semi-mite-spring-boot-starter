@@ -11,10 +11,45 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Maintains a live index of native C++ functions available for invocation,
+ * discovered by scanning {@code .cpp} files in the configured scripts directory.
+ *
+ * <p>On construction, the registry performs an initial scan of {@code scriptsDir}
+ * and registers all functions marked with {@code // @mite}. A background daemon
+ * thread then monitors the directory for file changes and automatically rescans
+ * when a {@code .cpp} file is created, modified, or deleted — enabling runtime
+ * hot-reload of native code without restarting the application.
+ *
+ * <h2>Indexing</h2>
+ * <p>Functions are indexed by name. Multiple overloads (functions with the same name
+ * but different parameter signatures) are stored as a list under the same key.
+ * During resolution, overloads are matched by comparing argument types at runtime.
+ *
+ * <h2>Function name uniqueness</h2>
+ * <p>All {@code .cpp} files in {@code scriptsDir} share a single flat namespace.
+ * If two files define a {@code // @mite}-marked function with the same name and
+ * compatible parameter types, the first match found during {@link #resolve} is used.
+ * To avoid ambiguity, function names should be unique across all source files.
+ *
+ * <h2>Hot reload</h2>
+ * <p>The background watcher uses a 150ms debounce delay ({@code Thread.sleep(150)})
+ * before rescanning, to avoid reading partially written files when IDEs save in
+ * multiple stages. The watcher thread is daemon, so it does not prevent JVM shutdown.
+ *
+ * @see org.example.parser.CppParser
+ * @see FunctionSignature
+ * @see org.example.engine.DefaultCppEngine
+ */
 public class FunctionRegistry {
 
     private final Path scriptsDir;
     private final CppParser parser = new CppParser();
+
+    /**
+     * The function index: maps function name to a list of all registered overloads,
+     * each paired with the source file they were parsed from.
+     */
     private final Map<String, List<ResolvedFunction>> index = new ConcurrentHashMap<>();
 
     private static final Logger log = LoggerFactory.getLogger(FunctionRegistry.class);
@@ -25,6 +60,18 @@ public class FunctionRegistry {
         startWatcher();
     }
 
+    /**
+     * Clears the current index and rescans all {@code .cpp} files in {@code scriptsDir}.
+     *
+     * <p>Files under the {@code compileCache} subdirectory are excluded from scanning
+     * to avoid indexing preprocessed copies of source files stored there by
+     * {@link org.example.compiler.CppCompiler}.
+     *
+     * <p>If {@code scriptsDir} does not exist, the scan completes immediately with
+     * an empty index.
+     *
+     * @throws RuntimeException if the directory cannot be traversed
+     */
     private void scan() {
         index.clear();
         if (!Files.exists(scriptsDir)) return;
@@ -38,6 +85,12 @@ public class FunctionRegistry {
         }
     }
 
+    /**
+     * Parses a single {@code .cpp} file and adds all discovered {@code // @mite}
+     * functions to the index.
+     *
+     * @param cppFile the source file to parse and index
+     */
     private void indexFile(Path cppFile) {
         List<FunctionSignature> sigs = parser.parse(cppFile);
         for (FunctionSignature sig : sigs) {
@@ -46,6 +99,16 @@ public class FunctionRegistry {
         }
     }
 
+    /**
+     * Starts a background daemon thread that monitors {@code scriptsDir} for
+     * file system changes and triggers a full rescan when any change is detected.
+     *
+     * <p>A 150ms debounce sleep is applied after detecting the first event before
+     * draining the event queue and rescanning, to allow IDEs that write files in
+     * multiple stages to finish writing before the parser reads the file.
+     *
+     * <p>The watcher thread is daemon so it does not prevent JVM shutdown.
+     */
     private void startWatcher() {
         Thread watcher = new Thread(() -> {
             try {
@@ -71,6 +134,20 @@ public class FunctionRegistry {
         watcher.start();
     }
 
+    /**
+     * Resolves a native function by name and runtime argument types.
+     *
+     * <p>All registered overloads for {@code name} are tested against {@code args}
+     * using {@link #matches}. The first matching overload is returned. If no overload
+     * matches, {@link Optional#empty()} is returned and the caller is expected to
+     * throw a descriptive error.
+     *
+     * @param name the native function name to look up
+     * @param args the Java arguments that will be passed to the function;
+     *             their runtime types are used for overload matching
+     * @return the first {@link ResolvedFunction} whose signature matches {@code args},
+     * or {@link Optional#empty()} if no match is found
+     */
     public Optional<ResolvedFunction> resolve(String name, Object[] args) {
         List<ResolvedFunction> overloads = index.get(name);
         if (overloads == null) return Optional.empty();
@@ -80,6 +157,17 @@ public class FunctionRegistry {
                 .findFirst();
     }
 
+    /**
+     * Checks whether the given signature is compatible with the provided arguments.
+     *
+     * <p>The parameter count must match exactly. Each argument is checked against
+     * its corresponding C++ parameter type using {@link #typeMatches}.
+     * A {@code null} argument is accepted for any pointer or string type.
+     *
+     * @param sig  the candidate native function signature
+     * @param args the Java arguments to match against
+     * @return {@code true} if all parameter types match the corresponding argument types
+     */
     private boolean matches(FunctionSignature sig, Object[] args) {
         List<String> paramTypes = sig.paramTypes();
         if (paramTypes.size() != args.length) return false;
@@ -103,6 +191,27 @@ public class FunctionRegistry {
         return true;
     }
 
+    /**
+     * Determines whether a single Java argument is compatible with a C++ parameter type.
+     *
+     * <p>Matching rules:
+     * <ul>
+     *   <li>{@link NativeResource} matches any pointer type ({@code T*}).</li>
+     *   <li>Primitive arrays ({@code float[]}, {@code int[]}, etc.) match their
+     *       corresponding C++ pointer types ({@code float*}, {@code int*}, etc.).</li>
+     *   <li>{@link java.util.Collection} matches any numeric pointer type.</li>
+     *   <li>Scalar Java types match their exact C++ equivalents
+     *       ({@code Integer} → {@code int}, {@code Float} → {@code float}, etc.).</li>
+     *   <li>For custom struct pointer types (e.g., {@code User*}), the Java class
+     *       simple name is compared to the base C++ type. Arrays and collections of
+     *       custom structs also match. {@code struct} and {@code class} keywords
+     *       in the C++ type string are stripped before comparison.</li>
+     * </ul>
+     *
+     * @param cppType the C++ type string from the parsed function signature
+     * @param arg     the Java argument whose type is being checked
+     * @return {@code true} if the argument is compatible with the C++ type
+     */
     private boolean typeMatches(String cppType, Object arg) {
         if (arg instanceof NativeResource) {
             return cppType.endsWith("*");
@@ -156,6 +265,16 @@ public class FunctionRegistry {
         };
     }
 
+    /**
+     * A resolved match pairing a parsed {@link FunctionSignature} with the
+     * {@code .cpp} source file that declared it.
+     *
+     * <p>Used by {@link org.example.engine.DefaultCppEngine} to determine which
+     * file to compile when invoking the function.
+     *
+     * @param signature the parsed function signature
+     * @param file      path to the {@code .cpp} source file containing the function
+     */
     public record ResolvedFunction(FunctionSignature signature, Path file) {
     }
 }

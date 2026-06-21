@@ -74,7 +74,7 @@ public class DefaultCppEngine implements CppEngine {
      * Path to the persistent compilation cache file, stored alongside compiled libraries.
      * Survives process restarts and avoids recompilation of unchanged sources.
      */
-    private final Path cacheFile = Path.of("cppScripts/compileCache", ".mite_cache.properties");
+    private final Path cacheFile;
     /**
      * Persistent key-value store: {@code sourcePath → libPath|lastModified}.
      */
@@ -104,9 +104,10 @@ public class DefaultCppEngine implements CppEngine {
      * @param compiler the {@link CppCompiler} used to build native shared libraries
      * @param registry the {@link FunctionRegistry} used to resolve function signatures by name
      */
-    public DefaultCppEngine(CppCompiler compiler, FunctionRegistry registry) {
+    public DefaultCppEngine(CppCompiler compiler, FunctionRegistry registry, Path scriptsDir) {
         this.compiler = compiler;
         this.registry = registry;
+        this.cacheFile = scriptsDir.resolve("compileCache").resolve(".mite_cache.properties");
         loadCache();
     }
 
@@ -471,9 +472,9 @@ public class DefaultCppEngine implements CppEngine {
                 return null;
             }
             if ("const char*".equals(returnType) || "std::string".equals(returnType)) {
-                MemorySegment safe = seg.reinterpret(Long.MAX_VALUE);
+                MemorySegment safe = seg.reinterpret(4096);
                 long len = 0;
-                while (safe.get(ValueLayout.JAVA_BYTE, len) != 0) len++;
+                while (len < 4096 && safe.get(ValueLayout.JAVA_BYTE, len) != 0) len++;
                 return new String(safe.asSlice(0, len).toArray(ValueLayout.JAVA_BYTE));
             }
 
